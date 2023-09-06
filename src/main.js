@@ -25,19 +25,19 @@ const main = async () => {
             let changeDetails;
 
             if (instanceUrl == "") {
-                displayErrorMsg("Please provide a valid 'Instance Url' to proceed with Get Change Request");
+                displayErrorMsg("Please provide a valid 'Instance Url' to proceed with Get Change Request" ,continueOnError);
                 return;
             }
             if (passwd == "") {
-                displayErrorMsg("Please provide a valid 'User Password' to proceed with Get Change Request");
+                displayErrorMsg("Please provide a valid 'User Password' to proceed with Get Change Request",continueOnError);
                 return;
             }
             if (username == "") {
-                displayErrorMsg("Please provide a valid 'User Name' to proceed with Get Change Request");
+                displayErrorMsg("Please provide a valid 'User Name' to proceed with Get Change Request",continueOnError);
                 return;
             }
             if (toolId == "") {
-                displayErrorMsg("Please provide a valid 'Tool Id' to proceed with Get Change Request");
+                displayErrorMsg("Please provide a valid 'Tool Id' to proceed with Get Change Request", continueOnError);
                 return;
             }
 
@@ -45,7 +45,7 @@ const main = async () => {
                 changeDetails = JSON.parse(changeDetailsStr);
             } catch (e) {
                 console.log(`Unable to parse Error occured with message ${e}`);
-                displayErrorMsg("Failed parsing changeRequestDetails, please provide a valid JSON");
+                displayErrorMsg("Failed parsing changeRequestDetails, please provide a valid JSON", continueOnError);
                 return;
             }
 
@@ -55,7 +55,7 @@ const main = async () => {
                 githubContext = JSON.parse(githubContextStr);
             } catch (e) {
                 console.log(`Error occured with message ${e}`);
-                displayErrorMsg("Exception parsing github context");
+                displayErrorMsg("Exception parsing github context", continueOnError);
                 return;
             }
 
@@ -99,29 +99,29 @@ const main = async () => {
                     core.setOutput("change-request-number", response.data.result.number);
                 } else {
                     status = "NOT SUCCESSFUL";
-                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.');
+                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.', continueOnError);
                 }
 
             } catch (err) {
                 status = "NOT SUCCESSFUL";
                 if (!err.response) {
-                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.');
+                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.', continueOnError);
                 } else {
                     status = "FAILURE";
                     if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
-                        displayErrorMsg('Invalid ServiceNow Instance URL. Please correct the URL and try again.');
+                        displayErrorMsg('Invalid ServiceNow Instance URL. Please correct the URL and try again.', continueOnError);
                     }
 
                     if (err.message.includes('401')) {
-                        displayErrorMsg('Invalid Credentials. Please correct the credentials and try again.');
+                        displayErrorMsg('Invalid Credentials. Please correct the credentials and try again.', continueOnError);
                     }
 
                     if (err.message.includes('405')) {
-                        displayErrorMsg('Response Code from ServiceNow is 405. Please check ServiceNow logs for more details.');
+                        displayErrorMsg('Response Code from ServiceNow is 405. Please check ServiceNow logs for more details.', continueOnError);
                     }
 
                     if (err.response.status == 500) {
-                        displayErrorMsg('Response Code from ServiceNow is 500. Please check ServiceNow logs for more details.')
+                        displayErrorMsg('Response Code from ServiceNow is 500. Please check ServiceNow logs for more details.', continueOnError)
                     }
 
                     if (err.response.status == 400 || err.response.status == 404) {
@@ -130,14 +130,14 @@ const main = async () => {
                         let responseData = err.response.data;
                         if (responseData && responseData.result && responseData.result.errorMessage) {
                             errMsg = errMsg + responseData.result.errorMessage + errMsgSuffix;
-                            displayErrorMsg(errMsg);
+                            displayErrorMsg(errMsg, continueOnError);
                         }
                         else if (responseData && responseData.result && responseData.result.details && responseData.result.details.errors) {
                             let errors = responseData.result.details.errors;
                             for (var index in errors) {
                                 errMsg = errMsg + errors[index].message + errMsgSuffix;
                             }
-                            displayErrorMsg(errMsg);
+                            displayErrorMsg(errMsg, continueOnError);
                         }
                     }
 
@@ -156,7 +156,7 @@ const main = async () => {
     }
     core.setOutput("status", status);
 }
-function displayErrorMsg(errMsg) {
+function displayErrorMsg(errMsg, continueOnError) {
 
     console.error('\n\x1b[31m' + errMsg + '\x1b[31m');
 
