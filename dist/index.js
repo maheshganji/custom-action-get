@@ -9336,7 +9336,7 @@ const main = async () => {
         let githubContextStr = core.getInput('context-github', { required: true });
 
 
-        var continueOnError = core.getInput('continueOnError');
+        var continueOnError = core.getInput('continue-on-error');
         continueOnError = continueOnError === undefined || continueOnError === "" ? false : (continueOnError == "true");
         core.setOutput("status", status);
         try {
