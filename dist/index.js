@@ -9331,8 +9331,13 @@ const main = async () => {
         const passwd = core.getInput('devops-integration-user-password');
         const toolId = core.getInput('tool-id');
 
+
         let changeDetailsStr = core.getInput('change-details', { required: true });
         let githubContextStr = core.getInput('context-github', { required: true });
+
+
+        var continueOnError = core.getInput('continueOnError');
+        continueOnError = continueOnError === undefined || continueOnError === "" ? false : (continueOnError == "true");
         core.setOutput("status", status);
         try {
 
@@ -9475,7 +9480,12 @@ const main = async () => {
 function displayErrorMsg(errMsg) {
 
     console.error('\n\x1b[31m' + errMsg + '\x1b[31m');
-    core.setFailed(errMsg);
+
+    console.log("Im continue on error variable"+ continueOnError);
+
+    if(!continueOnError)
+       core.setFailed(errMsg);
+
 }
 
 main();

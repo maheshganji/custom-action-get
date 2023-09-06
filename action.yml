@@ -18,7 +18,11 @@ inputs:
     required: true
   change-details:
     description: 'The inputs to identify change at Servicenow and GET it.'
-    required: true        
+    required: true
+  continueOnError:
+    description: 'Continue on Error for github workflow'
+    required: false
+            
 outputs:
   change-request-number: 
     description: 'Change Request Number found for the given change details'
