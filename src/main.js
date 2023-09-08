@@ -168,6 +168,7 @@ const main = async () => {
 function displayErrorMsg(errMsg) {
 
     console.error('\n\x1b[31m' + errMsg + '\x1b[31m');
+    core.setFailed(errMsg);
 }
 
 main();
