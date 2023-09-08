@@ -6,17 +6,13 @@ const main = async () => {
     try {
         console.log('Custom Action - GET => START');
         const instanceUrl = core.getInput('instance-url');
-        const username = core.getInput('devops-integration-user-name');
-        const passwd = core.getInput('devops-integration-user-password');
+        const username = core.getInput('devops-integration-user-name', { required: false });
+        const passwd = core.getInput('devops-integration-user-password', { required: false });
+        const token = core.getInput('devops-integration-token', { required: false });
         const toolId = core.getInput('tool-id');
-
 
         let changeDetailsStr = core.getInput('change-details', { required: true });
         let githubContextStr = core.getInput('context-github', { required: true });
-
-
-        var continueOnError = core.getInput('continue-on-error');
-        continueOnError = continueOnError === undefined || continueOnError === "" ? false : (continueOnError == "true");
         core.setOutput("status", status);
         try {
 
@@ -25,19 +21,11 @@ const main = async () => {
             let changeDetails;
 
             if (instanceUrl == "") {
-                displayErrorMsg("Please provide a valid 'Instance Url' to proceed with Get Change Request" ,continueOnError);
-                return;
-            }
-            if (passwd == "") {
-                displayErrorMsg("Please provide a valid 'User Password' to proceed with Get Change Request",continueOnError);
-                return;
-            }
-            if (username == "") {
-                displayErrorMsg("Please provide a valid 'User Name' to proceed with Get Change Request",continueOnError);
+                displayErrorMsg("Please provide a valid 'Instance Url' to proceed with Get Change Request");
                 return;
             }
             if (toolId == "") {
-                displayErrorMsg("Please provide a valid 'Tool Id' to proceed with Get Change Request", continueOnError);
+                displayErrorMsg("Please provide a valid 'Tool Id' to proceed with Get Change Request");
                 return;
             }
 
@@ -45,7 +33,7 @@ const main = async () => {
                 changeDetails = JSON.parse(changeDetailsStr);
             } catch (e) {
                 console.log(`Unable to parse Error occured with message ${e}`);
-                displayErrorMsg("Failed parsing changeRequestDetails, please provide a valid JSON", continueOnError);
+                displayErrorMsg("Failed parsing changeRequestDetails, please provide a valid JSON");
                 return;
             }
 
@@ -55,7 +43,7 @@ const main = async () => {
                 githubContext = JSON.parse(githubContextStr);
             } catch (e) {
                 console.log(`Error occured with message ${e}`);
-                displayErrorMsg("Exception parsing github context", continueOnError);
+                displayErrorMsg("Exception parsing github context");
                 return;
             }
 
@@ -68,7 +56,7 @@ const main = async () => {
             if (buildNumber == null || buildNumber == '')
                 buildNumber = `${githubContext.run_id}` + '/attempts/' + `${githubContext.run_attempt}`;
             else
-                buildNumber = buildNumber + '/attempts/' + `${githubContext.run_attempt}`
+                buildNumber = buildNumber + '/attempts/' + `${githubContext.run_attempt}`;
 
             if (pipelineName == null || pipelineName == '')
                 pipelineName = `${githubContext.repository}` + '/' + `${githubContext.workflow}`;
@@ -78,19 +66,40 @@ const main = async () => {
             console.log("buildNumber => " + buildNumber + ", pipelineName => " + pipelineName + ", stageName => " + stageName);
 
 
-            const restendpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeInfo?buildNumber=${buildNumber}&stageName=${stageName}&pipelineName=${pipelineName}&toolId=${toolId}`;
+            let restendpoint = '';
             let response;
+            let httpHeaders = {};
 
             try {
-                const token = `${username}:${passwd}`;
-                const encodedToken = Buffer.from(token).toString('base64');
+                if (token === '' && username === '' && passwd === '') {
+                    core.setFailed('Either secret token or integration username, password is needed for integration user authentication');
+                    return;
+                }
+                else if (token !== '') {
+                    restendpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeInfo?buildNumber=${buildNumber}&stageName=${stageName}&pipelineName=${pipelineName}&toolId=${toolId}`;
+                    const defaultHeadersForToken = {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+                    };
+                    httpHeaders = { headers: defaultHeadersForToken };
+                }
+                else if (username !== '' && passwd !== '') {
+                    restendpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeInfo?buildNumber=${buildNumber}&stageName=${stageName}&pipelineName=${pipelineName}&toolId=${toolId}`;
+                    const tokenBasicAuth = `${username}:${passwd}`;
+                    const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
 
-                const defaultHeaders = {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Authorization': 'Basic ' + `${encodedToken}`
-                };
-                let httpHeaders = { headers: defaultHeaders };
+                    const defaultHeadersForBasicAuth = {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+                    };
+                    httpHeaders = { headers: defaultHeadersForBasicAuth };
+                }
+                else {
+                    core.setFailed('For Basic Auth, Username and Password is mandatory for integration user authentication');
+                    return;
+                }
                 response = await axios.get(restendpoint, httpHeaders);
 
                 if (response.data && response.data.result) {
@@ -99,29 +108,29 @@ const main = async () => {
                     core.setOutput("change-request-number", response.data.result.number);
                 } else {
                     status = "NOT SUCCESSFUL";
-                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.', continueOnError);
+                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.');
                 }
 
             } catch (err) {
                 status = "NOT SUCCESSFUL";
                 if (!err.response) {
-                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.', continueOnError);
+                    displayErrorMsg('No response from ServiceNow. Please check ServiceNow logs for more details.');
                 } else {
                     status = "FAILURE";
                     if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
-                        displayErrorMsg('Invalid ServiceNow Instance URL. Please correct the URL and try again.', continueOnError);
+                        displayErrorMsg('Invalid ServiceNow Instance URL. Please correct the URL and try again.');
                     }
 
                     if (err.message.includes('401')) {
-                        displayErrorMsg('Invalid Credentials. Please correct the credentials and try again.', continueOnError);
+                        core.setFailed('Invalid Credentials. Please correct the credentials and try again.');
                     }
 
                     if (err.message.includes('405')) {
-                        displayErrorMsg('Response Code from ServiceNow is 405. Please check ServiceNow logs for more details.', continueOnError);
+                        displayErrorMsg('Response Code from ServiceNow is 405. Please check ServiceNow logs for more details.');
                     }
 
                     if (err.response.status == 500) {
-                        displayErrorMsg('Response Code from ServiceNow is 500. Please check ServiceNow logs for more details.', continueOnError)
+                        displayErrorMsg('Response Code from ServiceNow is 500. Please check ServiceNow logs for more details.')
                     }
 
                     if (err.response.status == 400 || err.response.status == 404) {
@@ -130,14 +139,14 @@ const main = async () => {
                         let responseData = err.response.data;
                         if (responseData && responseData.result && responseData.result.errorMessage) {
                             errMsg = errMsg + responseData.result.errorMessage + errMsgSuffix;
-                            displayErrorMsg(errMsg, continueOnError);
+                            displayErrorMsg(errMsg);
                         }
                         else if (responseData && responseData.result && responseData.result.details && responseData.result.details.errors) {
                             let errors = responseData.result.details.errors;
                             for (var index in errors) {
                                 errMsg = errMsg + errors[index].message + errMsgSuffix;
                             }
-                            displayErrorMsg(errMsg, continueOnError);
+                            displayErrorMsg(errMsg);
                         }
                     }
 
@@ -156,15 +165,9 @@ const main = async () => {
     }
     core.setOutput("status", status);
 }
-function displayErrorMsg(errMsg, continueOnError) {
+function displayErrorMsg(errMsg) {
 
     console.error('\n\x1b[31m' + errMsg + '\x1b[31m');
-
-    console.log("Im continue on error variable"+ continueOnError);
-
-    if(!continueOnError)
-       core.setFailed(errMsg);
-
 }
 
 main();
