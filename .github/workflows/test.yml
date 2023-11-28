@@ -1,4 +1,4 @@
-name: Get Security Summary Results
+name: Test
 
 on: workflow_dispatch
 
