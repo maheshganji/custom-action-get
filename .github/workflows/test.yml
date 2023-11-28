@@ -87,7 +87,7 @@ jobs:
           instance-url: ${{ secrets.SN_INSTANCE_URL }}
           tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
           context-github: ${{ toJSON(github) }}
-          job-name: 'Veracode Static Analysis'
+          job-name: 'Build'
           security-result-attributes: '{"scanner": "Checkmarx SAST", "projectId": "1076", "securityToolId": "fc650cbb87ee711094a2ea483cbb3569"}'
           
       # -  name: ServiceNow Change Approval
