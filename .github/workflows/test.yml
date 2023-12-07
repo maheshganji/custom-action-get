@@ -105,7 +105,7 @@ jobs:
       #     timeout: '3600'
          
   changeApproval:
-   # needs: scan
+    needs: build
     name: ServiceNow Change Approval
     runs-on: ubuntu-latest
     steps:     
