@@ -1,0 +1,162 @@
+def packageName = "package_app-devops.war"
+
+def artifactname = "artifact_app_devops.jar"
+def version = "1.${BUILD_NUMBER}"
+def semanticVersion = "1.${BUILD_NUMBER}.0"
+
+def repoName = "pramaraju96/DevOps-Test"
+def pipelineName = "${JOB_NAME}"
+
+def changeRequestId = "defaultChangeRequestId"
+def stageName = "Deploy"
+
+pipeline {
+	agent any
+	
+	tools {
+		maven 'Maven'
+	}
+
+	environment {
+		SCANNER_HOME = tool 'sonarScanner'
+		VERACODE_APPLICATION_NAME = 'ServiceNow DevOps App#1'
+		VERACODE_SCANNER_NAME = 'Veracode'
+	} 
+
+	stages {
+		stage('Build') {
+			steps {
+			echo "JOB_NAME...${JOB_NAME}"
+			  sh 'mvn -B -DskipTests clean compile'
+			}
+		}
+
+		stage('Test') {
+			steps {
+			  	sh 'mvn test'
+					sleep(5);
+			}
+			post {
+			 always {
+			    junit "**/target/surefire-reports/*.xml"
+			 }
+			}
+		}
+		   
+		stage('Pre-Prod') {
+			steps {
+				//sonarSummaries()
+
+				//veracode applicationName: "${env.VERACODE_APPLICATION_NAME}", criticality: 'VeryHigh', debug: true, timeout: 20, fileNamePattern: '', pHost: '', pPassword: '', pUser: '', replacementPattern: '', sandboxName: '', scanExcludesPattern: '', scanIncludesPattern: '', scanName: "${BUILD_TAG}", uploadExcludesPattern: '', uploadIncludesPattern: 'target/DevOps-Test-1.39.0-SNAPSHOT.jar', vid: "5a57339d6779ffb76782e03df3f6e9d1", vkey: "f31d151c427a3286469a6291b14dee15e7f553e066b32c801f09014dc3282de4f51a81cd0bde7c7dd9d95de9a71a32c8a2c582158f278320ae765fe9fd232e0a"
+				//snDevOpsSecurityResult securityResultAttributes: "{'scanner': '${env.VERACODE_SCANNER_NAME}', 'applicationName': '${env.VERACODE_APPLICATION_NAME}', 'securityToolId':'3a9f123847c43d103c9a3524846d43b9'}"
+
+				snDevOpsArtifact(artifactsPayload: """
+				{
+				"artifacts":
+				[
+				    {
+				        "name": "${artifactname}",
+				        "version": "${version}",
+				        "semanticVersion": "${semanticVersion}",
+				        "repositoryName": "${repoName}"
+				    }
+				],
+				"branchName": "main"
+				}""")
+
+				snDevOpsPackage(
+				name: "${packageName}",
+				artifactsPayload: """
+				{
+				    "artifacts":
+				    [
+				        {
+				            "name": "${artifactname}",
+				            "version": "${version}",
+				            "semanticVersion": "${semanticVersion}",
+				            "repositoryName": "${repoName}"
+				        }
+				    ],
+				    "branchName": "main"
+				}""")
+			}     
+		}
+		  
+		stage('Deploy') {
+			 steps {
+			    echo 'Deploying the change....'
+			    
+			    snDevOpsChange(changeRequestDetails:"""
+			    {
+				    "attributes":
+				    {
+				        "short_description": "Test description",
+				        "priority": "1",
+				        "start_date": "2021-02-05 08:00:00",
+				        "end_date": "2022-04-05 08:00:00",
+				        "justification": "test justification",
+				        "description": "test description",
+				        "cab_required": true,
+				        "comments": "This update for work notes is from jenkins file",
+				        "work_notes": "test work notes"
+				    },
+				    "setCloseCode": true
+				}""")
+			    
+			    //snDevOpsChange(ignoreErrors:false)
+			    
+			    script {
+			    	echo 'Inside script step...'
+			    	
+			    	changeRequestId = snDevOpsGetChangeNumber()
+			    	echo "Change Request Id without any attributes... ${changeRequestId}"
+
+					changeRequestId = snDevOpsGetChangeNumber(
+						changeDetails: """
+						{
+							"build_number":"${BUILD_NUMBER}",
+							"pipeline_name":"${pipelineName}",
+							"stage_name":"${stageName}"
+						}""")
+					echo "Change Request Id with attributes... ${changeRequestId}"
+
+					echo "Updating the change details ..."
+					snDevOpsUpdateChangeInfo(
+					    changeRequestDetails: """
+					    {
+					        "state":"3",
+					        "comments": "Change request comments UPDATED!!!",
+					        "work_notes": "Change request work_notes UPDATED!!!"
+					    }""",
+					    changeRequestNumber: """${changeRequestId}""")
+					echo "Verify the state, comments and work_notes are updated"
+			    }
+			 }
+		}
+	}
+}
+
+def sonarSummaries() {
+	withSonarQubeEnv(installationName: 'sonarqube1.sndevops.xyz'){
+              //sh './mvn clean org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
+			sh 'mvn clean verify sonar:sonar \
+			    -Dsonar.login=623a5b264ce3e56cd686b493e1229b9498d592f9 \
+			    -Dsonar.host.url=http://sonarqube1.sndevops.xyz \
+			    -Dsonar.organization=pramaraju96 \
+			    -Dsonar.projectKey=pramaraju96_DevOps-Test'
+        }
+	//withSonarQubeEnv('sonarqube1.sndevops.xyz'){
+		//if(fileExists("sonar-project.properties")) {
+		//	sh '${SCANNER_HOME}/bin/sonar-scanner'
+		//} else {
+			//sh 'mvn clean verify sonar:sonar \
+			 //   -Dsonar.login=623a5b264ce3e56cd686b493e1229b9498d592f9 \
+			 //   -Dsonar.host.url=http://sonarqube1.sndevops.xyz \
+			  //  -Dsonar.organization=pramaraju96 \
+			  //  -Dsonar.projectKey=pramaraju96_DevOps-Test'
+		//}
+	//}
+	//timeout(time: 10, unit: 'MINUTES') {
+	//	waitForQualityGate abortPipeline: false
+	//}
+}

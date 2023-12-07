@@ -1,0 +1,72 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+trigger:
+  - none
+pool:
+  vmImage: ubuntu-latest
+
+# variables:
+# - group: Variable Group
+
+stages:
+  - stage: Build
+    jobs:
+      - job: 'Job_Build'
+        steps:
+        - script: echo Hello, world!
+          displayName: 'Run a one-line script'
+
+  - stage: Test
+    dependsOn: Build
+    jobs:
+      - job: 'Job_Test'
+        steps:
+        - script: echo Hello, world!
+          displayName: 'Run a one-line script'
+        - task: SonarQubePrepare@5
+          inputs:
+            SonarQube: 'SonarQube2'
+            scannerMode: 'Other'
+            extraProperties: |
+              # Additional properties that will be passed to the scanner,
+              # Put one key=value per line, example:
+              # sonar.exclusions=**/*.bin
+              sonar.projectKey=Basic_Project1_DevOps-Test_AYsd6a1P_xDA_af4Ff8Y
+              sonar.projectName=DevOps-Test
+
+        - task: Maven@3
+          inputs:
+            mavenPomFile: 'pom.xml'
+            publishJUnitResults: true
+            testResultsFiles: '**/surefire-reports/TEST-*.xml'
+            testRunTitle: 'Test results'
+            javaHomeOption: 'JDKVersion'
+            mavenVersionOption: 'Default'
+            mavenAuthenticateFeed: false
+            effectivePomSkip: false
+            sonarQubeRunAnalysis: true
+            sqMavenPluginVersionChoice: 'latest'
+
+  - stage: Change
+    dependsOn: Test
+    jobs:
+      - job: 'Job_Change'
+        pool: server
+        steps:
+        - task: ServiceNow-DevOps-Server-Change-Acceleration@1
+          inputs:
+            connectedServiceName: 'dsinghu6-Basic Project1-ServiceNow DevOps Service Connection'
+            UpstreamJob: 'Job_Test'
+            changeRequestDetails: |
+              {
+                                  "autoCloseChange": true,
+                                  "setCloseCode": false,
+                                  "attributes": {
+                                    "category": "DevOps",
+                                    "priority": "2",
+                                    "comments": "This is a sample pipeline script to be added in your change step",
+                                    "work_notes": "adding Auto closeCose True"
+                                }
+              }
