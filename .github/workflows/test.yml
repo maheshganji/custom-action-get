@@ -77,7 +77,6 @@ jobs:
           deleteincompletescan: 1
           scantimeout: 20
           
-
       - name: ServiceNow DevOps Security Results
         uses: ServiceNow/servicenow-devops-security-result@main
         with:
