@@ -2,7 +2,7 @@ name: Test
 
 on:
   workflow_dispatch:
-    
+
 jobs:
 
   build:
@@ -44,3 +44,5 @@ jobs:
           change-details: '{"build_number":"4095369654","pipeline_name":"maheshganji/CustomActionsGetandUpdateTest/CustomActionGetWorkflow","stage_name":"ServiceNow Change Approval"}'         
       - name: Output of GetChangeDetails
         run: echo "The Status of Update Change Request Details => ${{ steps.get.outputs.status }}"
+
+        
