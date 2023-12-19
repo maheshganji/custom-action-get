@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Servicenow Get Change Details
 
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -44,5 +45,9 @@ jobs:
           change-details: '{"build_number":"4095369654","pipeline_name":"maheshganji/CustomActionsGetandUpdateTest/CustomActionGetWorkflow","stage_name":"ServiceNow Change Approval"}'         
       - name: Output of GetChangeDetails
         run: echo "The Status of Update Change Request Details => ${{ steps.get.outputs.status }}"
+
+
+
+
 
         
