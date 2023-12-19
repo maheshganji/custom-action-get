@@ -4,8 +4,7 @@ name: Large Workflow
     branches:
       - main
   
-jobs:
-  
+jobs: 
   build:
     runs-on: ubuntu-latest
     steps:
