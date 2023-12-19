@@ -1,5 +1,5 @@
-name: 250 Jobs Large Workflow
-'on': workflow_dispatch
+name: LargerWorkflowTest
+on: workflow_dispatch
  
 jobs: 
     Stage_1:
