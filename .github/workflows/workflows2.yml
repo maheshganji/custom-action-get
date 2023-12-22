@@ -1,8 +1,8 @@
 name: 500 Jobs Large Workflow
-'on': workflow_dispatch
-  # push:
-  #   branches:
-  #     - main
+'on':
+  push:
+    branches:
+      - main
 jobs:
   Stage_1:
    runs-on: ubuntu-latest
