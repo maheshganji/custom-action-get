@@ -1,5 +1,4 @@
 name: Test
-
 on:
   workflow_dispatch:
     
@@ -22,6 +21,8 @@ jobs:
       
     - name: Compile
       run: npm run build
+
+      
       
   GetChangeDetails:
     needs: build
