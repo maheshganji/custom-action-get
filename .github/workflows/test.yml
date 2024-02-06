@@ -1,17 +1,7 @@
 name: Test
 
 on:
-  workflow_dispatch:
-
-
-
-
-
-    
-
-
-
-    
+  workflow_dispatch:    
 jobs:
   Stage_1:
     runs-on: ubuntu-latest
