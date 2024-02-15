@@ -1,9 +1,6 @@
 name: Test
 
-on: 
-  pull_request:    # Sequence of patterns matched against refs/heads   
-    branches:     
-      - main  
+on: [push, pull_request]
 jobs:
   Stage_1:
     runs-on: ubuntu-latest
