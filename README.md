@@ -11,6 +11,9 @@ This custom action needs to be added at step level in a job to get change-reques
 ## Step 2: Configure Secrets in your GitHub Ogranization or GitHub repository
 On GitHub, go in your organization settings or repository settings, click on the _Secrets > Actions_ and create a new secret.
 
+
+Tsting
+
 Create secrets called 
 - `SN_DEVOPS_USER`
 - `SN_DEVOPS_PASSWORD`
