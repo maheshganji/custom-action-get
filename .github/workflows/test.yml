@@ -1,6 +1,13 @@
 name: Test
 
-on: [push, pull_request]
+on: 
+  # workflow_dispatch
+  # push:
+  #   branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened]
+    
 jobs:
   Stage_1:
     runs-on: ubuntu-latest
