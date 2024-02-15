@@ -1,7 +1,12 @@
 name: Test
 
-on:
-  workflow_dispatch:
+on: 
+  # workflow_dispatch
+  # push:
+  #   branches: [ "main" ]
+  pull_request:
+    branches: [ "prod" ]
+    types: [opened, synchronize, reopened]
     
 jobs:
 
