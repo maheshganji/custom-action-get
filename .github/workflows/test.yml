@@ -1,9 +1,6 @@
 name: Test
 
-on: 
-  pull_request:    # Sequence of patterns matched against refs/heads   
-    branches:     
-      - main      
+on: workflow_dispatch 
 
 jobs:
   build:
@@ -81,17 +78,17 @@ jobs:
 #           scantimeout: 20
           
 
-      # - name: ServiceNow DevOps Security Results
-      #   uses: ServiceNow/servicenow-devops-security-result@main
-      #   with:
-      #     devops-integration-user-name: ${{ secrets.SN_DEVOPS_USER }}
-      #     devops-integration-token: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
-      #     devops-integration-user-password: ${{ secrets.SN_DEVOPS_PASSWORD }}
-      #     instance-url: ${{ secrets.SN_INSTANCE_URL }}
-      #     tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
-      #     context-github: ${{ toJSON(github) }}
-      #     job-name: 'Build'
-      #     security-result-attributes: '{ "scanner": "Veracode", "applicationName": "VeraDemo10", "securityToolId": "aad5ab8883d775501a6072326daad3ce" }'
+      - name: ServiceNow DevOps Security Results
+        uses: ServiceNow/servicenow-devops-security-result@main
+        with:
+          devops-integration-user-name: ${{ secrets.SN_DEVOPS_USER }}
+          devops-integration-token: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
+          devops-integration-user-password: ${{ secrets.SN_DEVOPS_PASSWORD }}
+          instance-url: ${{ secrets.SN_INSTANCE_URL }}
+          tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
+          context-github: ${{ toJSON(github) }}
+          job-name: 'Build'
+          security-result-attributes: '{ "scanner": "Veracode", "applicationName": "VeraDemo10", "securityToolId": "aad5ab8883d775501a6072326daad3ce" }'
           
       # -  name: ServiceNow Change Approval
       #    uses: ServiceNow/servicenow-devops-change@main
