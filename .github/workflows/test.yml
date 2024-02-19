@@ -33,7 +33,7 @@ jobs:
                   # Github Context
                   context-github: ${{ toJSON(github) }}
                   # XUnit xml report file name with path
-                  xml-report-filename: JestFolder/jest-junit.xml 
+                  xml-report-filename: dist/jest-junit.xml
   # Stage_2:
   #   runs-on: ubuntu-latest
   #   needs: Stage_1
