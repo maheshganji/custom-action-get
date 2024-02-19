@@ -26,8 +26,8 @@ jobs:
               with:
                   devops-integration-user-name: ${{ secrets.SN_DEVOPS_USER }}
                   devops-integration-user-password: ${{ secrets.SN_DEVOPS_PASSWORD }}
-                  instance-url: ${{ secrets.SN_INSTANCE_NAME }}
-                  tool-id: ${{ secrets.SN_ORCH_TOOL_ID }}
+                  instance-url: 'https://empkiranv2.service-now.com/'
+                  tool-id: '412bfc3e47dc8e1024860355f16d4341'
                   # Job Name
                   job-name: 'Test' # Should be same name as declared in 'name' clause of the current Stage
                   # Github Context
