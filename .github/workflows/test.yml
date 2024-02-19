@@ -1,12 +1,12 @@
 name: Test
 
 on: 
-  workflow_dispatch
+  # workflow_dispatch
   # push:
   #   branches: [ "main" ]
-  # pull_request:
-  #   branches: [ "main" ]
-  #   types: [opened, synchronize, reopened]
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened]
     
 jobs:
   Stage_1:
