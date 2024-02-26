@@ -4970,20 +4970,37 @@ exports["default"] = _default;
 const core = __nccwpck_require__(2186);
 const axios = __nccwpck_require__(8757);
 
+function circularSafeStringify(obj) {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, value) => {
+        if (key === '_sessionCache') return undefined;
+        if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+        }
+        return value;
+    });
+}
+
 async function createChange({
     instanceUrl,
     toolId,
     username,
     passwd,
+    token,
     jobname,
     githubContextStr,
     changeRequestDetailsStr,
-    changeCreationTimeOut
+    changeCreationTimeOut,
+    deploymentGateStr
 }) {
 
     console.log('Calling Change Control API to create change....');
 
     let changeRequestDetails;
+    let deploymentGateDetails;
     let attempts = 0;
     changeCreationTimeOut = changeCreationTimeOut * 1000;
 
@@ -4992,6 +5009,14 @@ async function createChange({
     } catch (e) {
         console.log(`Error occured with message ${e}`);
         throw new Error("Failed parsing changeRequestDetails");
+    }
+
+    try {
+        if (deploymentGateStr)
+            deploymentGateDetails = JSON.parse(deploymentGateStr);
+    } catch (e) {
+        console.log(`Error occured with message ${e}`);
+        throw new Error("Failed parsing deploymentGateDetails");
     }
 
     let githubContext;
@@ -5018,27 +5043,53 @@ async function createChange({
             'branchName': `${githubContext.ref_name}`,
             'changeRequestDetails': changeRequestDetails
         };
+        if (deploymentGateStr) {
+            payload.deploymentGateDetails = deploymentGateDetails;
+        }
     } catch (err) {
         console.log(`Error occured with message ${err}`);
         throw new Error("Exception preparing payload");
     }
 
-    const postendpoint = `${instanceUrl}/api/sn_devops/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+    let postendpoint = '';
     let response;
     let status = false;
 
-    while (attempts < 3) {
+    if (token === '' && username === '' && passwd === '') {
+        throw new Error('Either secret token or integration username, password is needed for integration user authentication');
+    }
+    else if (token !== '') {
+        postendpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+        const defaultHeadersForToken = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+        };
+        httpHeaders = { headers: defaultHeadersForToken };
+    }
+    else if (username !== '' && passwd !== '') {
+        postendpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+        const tokenBasicAuth = `${username}:${passwd}`;
+        const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
+
+        const defaultHeadersForBasicAuth = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+        };
+        httpHeaders = { headers: defaultHeadersForBasicAuth };
+    }
+    else {
+        throw new Error('For Basic Auth, Username and Password is mandatory for integration user authentication');
+    }
+    var retry = true;
+    core.debug("[ServiceNow DevOps], Sending Request for Create Change, Request Header :" + JSON.stringify(httpHeaders) + ", Payload :" + JSON.stringify(payload) + "\n");
+    while (retry) {
         try {
             ++attempts;
-            const token = `${username}:${passwd}`;
-            const encodedToken = Buffer.from(token).toString('base64');
-
-            const defaultHeaders = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': 'Basic ' + `${encodedToken}`
-            };
-            let httpHeaders = { headers: defaultHeaders, timeout: changeCreationTimeOut };
+            retry = false;
+            httpHeaders.timeout = changeCreationTimeOut;
+            payload.retryattempts = attempts;
             response = await axios.post(postendpoint, JSON.stringify(payload), httpHeaders);
             status = true;
             break;
@@ -5072,31 +5123,40 @@ async function createChange({
                 let responseData = err.response.data;
                 if (responseData && responseData.error && responseData.error.message) {
                     errMsg = responseData.error.message;
-                } else if (responseData && responseData.result && responseData.result.details && responseData.result.details.errors) {
-                    errMsg = 'ServiceNow DevOps Change is not created. ';
-                    let errors = err.response.data.result.details.errors;
-                    for (var index in errors) {
-                        errMsg = errMsg + errors[index].message;
+                } else if (responseData && responseData.result) {
+                    let result = responseData.result;
+                    if (result.details && result.details.errors) {
+                        errMsg = 'ServiceNow DevOps Change is not created. ';
+                        let errors = err.response.data.result.details.errors;
+                        for (var index in errors) {
+                            errMsg = errMsg + errors[index].message;
+                        }
+                    }
+                    else if (result.errorMessage) {
+                        errMsg = result.errorMessage;
                     }
                 }
-                if (errMsg.indexOf('callbackURL') == -1)
-                    throw new Error(errMsg);
-                else if (attempts >= 3) {
-                    errMsg = 'Task/Step Execution not created in ServiceNow DevOps for this job/stage ' + jobname + '. Please check Inbound Events processing details in ServiceNow instance and ServiceNow logs for more details.';
+                if (errMsg.indexOf('Waiting for Inbound Event') == -1) {
+                    retry = true;
+                } else if (attempts >= 3) {
+                    retry = false;
+                } else if (errMsg.indexOf('callbackURL') == -1) {
                     throw new Error(errMsg);
                 }
+                if (!retry) {
+                    core.debug("[ServiceNow DevOps], Receiving response for Create Change, Response :" + circularSafeStringify(response) + "\n");
+                }
+                await new Promise((resolve) => setTimeout(resolve, 30000));
             }
-            await new Promise((resolve) => setTimeout(resolve, 30000));
         }
-    }
-    if (status) {
-        var result = response.data.result;
-        if (result && result.message) {
-            console.log('\n     \x1b[1m\x1b[36m' + result.message + '\x1b[0m\x1b[0m');
+        if (status) {
+            var result = response.data.result;
+            if (result && result.message) {
+                console.log('\n     \x1b[1m\x1b[36m' + result.message + '\x1b[0m\x1b[0m');
+            }
         }
     }
 }
-
 module.exports = { createChange };
 
 /***/ }),
@@ -5112,11 +5172,12 @@ async function doFetch({
   toolId,
   username,
   passwd,
+  token,
   jobname,
   githubContextStr,
-  PrevPollChangeDetails
+  prevPollChangeDetails
 }) {
-  // console.log(`\nPolling for change status..........`);
+
 
   let githubContext = JSON.parse(githubContextStr);
 
@@ -5125,7 +5186,8 @@ async function doFetch({
   const buildNumber = `${githubContext.run_id}`;
   const attemptNumber = `${githubContext.run_attempt}`;
 
-  const endpoint = `${instanceUrl}/api/sn_devops/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+  let endpoint = '';
+  let httpHeaders = {};
 
   let response = {};
   let status = false;
@@ -5133,16 +5195,27 @@ async function doFetch({
   let responseCode = 500;
 
   try {
-    const token = `${username}:${passwd}`;
-    const encodedToken = Buffer.from(token).toString('base64');
+    if (token !== '') {
+      endpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const defaultHeadersForToken = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+      };
+      httpHeaders = { headers: defaultHeadersForToken };
+    }
+    else {
+      endpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const tokenBasicAuth = `${username}:${passwd}`;
+      const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
 
-    const defaultHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Authorization': 'Basic ' + `${encodedToken}`
-    };
-
-    let httpHeaders = { headers: defaultHeaders };
+      const defaultHeadersForBasicAuth = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+      };
+      httpHeaders = { headers: defaultHeadersForBasicAuth };
+    }
     response = await axios.get(endpoint, httpHeaders);
     status = true;
   } catch (err) {
@@ -5159,6 +5232,12 @@ async function doFetch({
     }
 
     if (err.response.status == 400) {
+      let responseData = err.response.data;
+      if (responseData && responseData.result && responseData.result.errorMessage) {//Other technical error messages
+        let errMsg = responseData.result.errorMessage;
+        throw new Error(JSON.stringify({ "status": "error", "details": errMsg }));
+      }
+
       throw new Error("400");
     }
 
@@ -5193,24 +5272,41 @@ async function doFetch({
     let currChangeDetails = changeStatus.details;
     let changeState = currChangeDetails.status;
 
+    if (currChangeDetails) {
+      if (currChangeDetails.number)
+        core.setOutput('change-request-number', currChangeDetails.number);
+      if (currChangeDetails.sys_id)
+        core.setOutput('change-request-sys-id', currChangeDetails.sys_id);
+    }
+
     if (responseCode == 201) {
       if (changeState == "pending_decision") {
-        if (isChangeDetailsChanged(PrevPollChangeDetails, currChangeDetails)) {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
           console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
         }
         throw new Error(JSON.stringify({ "statusCode": "201", "details": currChangeDetails }));
-      } else
+      } else if ((changeState == "failed") || (changeState == "error")) {
+        throw new Error(JSON.stringify({ "status": "error", "details": currChangeDetails.details }));
+      } else if (changeState == "rejected" || changeState == "canceled_by_user") {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+          console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
+        }
         throw new Error("202");
+      }
     }
-
-    if (responseCode == 200) {
+    else if (responseCode == 200) {
+      if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+        console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
+      }
       console.log('\n****Change is Approved.');
     }
-  } else
+  }
+  else
     throw new Error("500");
 
   return true;
 }
+
 function isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails) {
   if (Object.keys(currChangeDetails).length !== Object.keys(prevPollChangeDetails).length) {
     return true;
@@ -5241,81 +5337,86 @@ async function tryFetch({
   toolId,
   username,
   passwd,
+  token,
   jobname,
   githubContextStr,
   abortOnChangeStepTimeout,
-  PrevPollChangeDetails
+  prevPollChangeDetails
 }) {
-  try {
-    await doFetch({
-      instanceUrl,
-      toolId,
-      username,
-      passwd,
-      jobname,
-      githubContextStr,
-      PrevPollChangeDetails
-    });
-  } catch (error) {
-    if (error.message == "500") {
-      throw new Error(`Internal server error. An unexpected error occurred while processing the request.`);
+    try {
+        await doFetch({
+          instanceUrl,
+          toolId,
+          username,
+          passwd,
+          token,
+          jobname,
+          githubContextStr,
+          prevPollChangeDetails
+        });
+    } catch (error) {
+        if (error.message == "500") {
+          throw new Error(`Internal server error. An unexpected error occurred while processing the request.`);
+        }
+
+        if (error.message == "400") {
+          throw new Error(`Bad Request. Missing inputs to process the request.`);
+        }
+
+        if (error.message == "401") {
+          throw new Error(`The user credentials are incorrect.`);
+        }
+
+        if (error.message == "403") {
+          throw new Error(`Forbidden. The user does not have the role to process the request.`);
+        }
+
+        if (error.message == "404") {
+          throw new Error(`Not found. The requested item was not found.`);
+        }
+
+        if (error.message == "202") {
+          throw new Error("****Change has been created but the change is either rejected or cancelled.");
+        }
+
+        const errorMessage = error.message;
+        if (errorMessage) {
+          const errorObject = JSON.parse(errorMessage);
+          if (errorObject && errorObject.statusCode == "201") {
+            prevPollChangeDetails = errorObject.details;
+          }else if(errorObject && errorObject.status == "error"){
+            //throws error incase of status is 'error'
+            throw new Error(errorObject.details);
+          }
+        }
+
+        // Wait and then continue
+        await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+
+        if (+new Date() - start > timeout * 1000) {
+          if(!abortOnChangeStepTimeout){
+             console.error('\n    \x1b[38;5;214m Timeout occured after '+timeout+' seconds but pipeline will coninue since abortOnChangeStepTimeout flag is false \x1b[38;5;214m');
+             return;
+          }
+             throw new Error(`Timeout after ${timeout} seconds.Workflow execution is aborted since abortOnChangeStepTimeout flag is true`);
+        }
+
+
+        await tryFetch({
+          start,
+          interval,
+          timeout,
+          instanceUrl,
+          toolId,
+          username,
+          passwd,
+          token,
+          jobname,
+          githubContextStr,
+          abortOnChangeStepTimeout,
+          prevPollChangeDetails
+        });
     }
-
-    if (error.message == "400") {
-      throw new Error(`Bad Request. Missing inputs to process the request.`);
-    }
-
-    if (error.message == "401") {
-      throw new Error(`The user credentials are incorrect.`);
-    }
-
-    if (error.message == "403") {
-      throw new Error(`Forbidden. The user does not have the role to process the request.`);
-    }
-
-    if (error.message == "404") {
-      throw new Error(`Not found. The requested item was not found.`);
-    }
-
-    if (error.message == "202") {
-      throw new Error("****Change has been created but the change is either rejected or cancelled.");
-    }
-    const errorMessage = error.message;
-    if (errorMessage) {
-      const errorObject = JSON.parse(errorMessage);
-      if (errorObject && errorObject.statusCode == "201") {
-        PrevPollChangeDetails = errorObject.details;
-        // console.log('\n****Change is pending for approval decision.');
-      }
-    }
-
-
-    // Wait and then continue
-    await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-
-    if (+new Date() - start > timeout * 1000) {
-      if (!abortOnChangeStepTimeout) {
-        console.error('\n    \x1b[38;5;214m Timeout occured after ' + timeout + ' seconds but pipeline will coninue since abortOnChangeStepTimeout flag is false \x1b[38;5;214m');
-        return;
-      }
-      throw new Error(`Timeout after ${timeout} seconds.Workflow execution is aborted since abortOnChangeStepTimeout flag is true`);
-    }
-
-
-    await tryFetch({
-      start,
-      interval,
-      timeout,
-      instanceUrl,
-      toolId,
-      username,
-      passwd,
-      jobname,
-      githubContextStr,
-      abortOnChangeStepTimeout,
-      PrevPollChangeDetails
-    });
-  }
 }
 
 module.exports = { tryFetch };
@@ -9683,13 +9784,15 @@ const axios = __nccwpck_require__(8757);
 const { createChange } = __nccwpck_require__(7767);
 const { tryFetch } = __nccwpck_require__(9538);
 
-const main = async () => {
+const main = async() => {
   try {
     const instanceUrl = core.getInput('instance-url', { required: true });
     const toolId = core.getInput('tool-id', { required: true });
-    const username = core.getInput('devops-integration-user-name', { required: true });
-    const passwd = core.getInput('devops-integration-user-password', { required: true });
+    const username = core.getInput('devops-integration-user-name', { required: false });
+    const passwd = core.getInput('devops-integration-user-password', { required: false });
+    const token = core.getInput('devops-integration-token', { required: false });
     const jobname = core.getInput('job-name', { required: true });
+    const deploymentGateStr = core.getInput('deployment-gate', { required: false });
 
     let changeRequestDetailsStr = core.getInput('change-request', { required: true });
     let githubContextStr = core.getInput('context-github', { required: true });
@@ -9708,36 +9811,41 @@ const main = async () => {
         toolId,
         username,
         passwd,
+        token,
         jobname,
         githubContextStr,
         changeRequestDetailsStr,
-        changeCreationTimeOut
+        changeCreationTimeOut,
+        deploymentGateStr
       });
     } catch (err) {
       if (abortOnChangeCreationFailure) {
         status = false;
         core.setFailed(err.message);
       }
-      else {
-        console.error("creation failed with error message " + err.message);
+      else { 
+        console.error("creation failed with error message ," + err.message);
         console.log('\n  \x1b[38;5;214m Workflow will continue executing the next step as abortOnChangeCreationFailure is ' + abortOnChangeCreationFailure + '\x1b[38;5;214m');
         return;
       }
     }
 
+    if (deploymentGateStr)
+      status = false; //do not poll to check for deployment gate feature
+
     if (status) {
       let timeout = parseInt(core.getInput('timeout') || 100);
       let interval = parseInt(core.getInput('interval') || 3600);
 
-      interval = interval >= 100 ? interval : 100;
-      timeout = timeout >= 100 ? timeout : 3600;
-      interval = 5;
+      interval = interval>=100 ? interval : 100;
+      timeout = timeout>=100? timeout : 3600;
 
       let abortOnChangeStepTimeout = core.getInput('abortOnChangeStepTimeout');
       abortOnChangeStepTimeout = abortOnChangeStepTimeout === undefined || abortOnChangeStepTimeout === "" ? false : (abortOnChangeStepTimeout == "true");
 
       let start = +new Date();
-      let PrevPollChangeDetails = {};
+      let prevPollChangeDetails = {};
+
       response = await tryFetch({
         start,
         interval,
@@ -9746,13 +9854,13 @@ const main = async () => {
         toolId,
         username,
         passwd,
+        token,
         jobname,
         githubContextStr,
         abortOnChangeStepTimeout,
-        PrevPollChangeDetails
+        prevPollChangeDetails
       });
 
-      console.log('Get change status was successfull.');
     }
   } catch (error) {
     core.setFailed(error.message);

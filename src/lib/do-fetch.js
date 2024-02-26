@@ -6,11 +6,12 @@ async function doFetch({
   toolId,
   username,
   passwd,
+  token,
   jobname,
   githubContextStr,
-  PrevPollChangeDetails
+  prevPollChangeDetails
 }) {
-  // console.log(`\nPolling for change status..........`);
+
 
   let githubContext = JSON.parse(githubContextStr);
 
@@ -19,7 +20,8 @@ async function doFetch({
   const buildNumber = `${githubContext.run_id}`;
   const attemptNumber = `${githubContext.run_attempt}`;
 
-  const endpoint = `${instanceUrl}/api/sn_devops/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+  let endpoint = '';
+  let httpHeaders = {};
 
   let response = {};
   let status = false;
@@ -27,16 +29,27 @@ async function doFetch({
   let responseCode = 500;
 
   try {
-    const token = `${username}:${passwd}`;
-    const encodedToken = Buffer.from(token).toString('base64');
+    if (token !== '') {
+      endpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const defaultHeadersForToken = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+      };
+      httpHeaders = { headers: defaultHeadersForToken };
+    }
+    else {
+      endpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const tokenBasicAuth = `${username}:${passwd}`;
+      const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
 
-    const defaultHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Authorization': 'Basic ' + `${encodedToken}`
-    };
-
-    let httpHeaders = { headers: defaultHeaders };
+      const defaultHeadersForBasicAuth = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+      };
+      httpHeaders = { headers: defaultHeadersForBasicAuth };
+    }
     response = await axios.get(endpoint, httpHeaders);
     status = true;
   } catch (err) {
@@ -53,6 +66,12 @@ async function doFetch({
     }
 
     if (err.response.status == 400) {
+      let responseData = err.response.data;
+      if (responseData && responseData.result && responseData.result.errorMessage) {//Other technical error messages
+        let errMsg = responseData.result.errorMessage;
+        throw new Error(JSON.stringify({ "status": "error", "details": errMsg }));
+      }
+
       throw new Error("400");
     }
 
@@ -87,24 +106,41 @@ async function doFetch({
     let currChangeDetails = changeStatus.details;
     let changeState = currChangeDetails.status;
 
+    if (currChangeDetails) {
+      if (currChangeDetails.number)
+        core.setOutput('change-request-number', currChangeDetails.number);
+      if (currChangeDetails.sys_id)
+        core.setOutput('change-request-sys-id', currChangeDetails.sys_id);
+    }
+
     if (responseCode == 201) {
       if (changeState == "pending_decision") {
-        if (isChangeDetailsChanged(PrevPollChangeDetails, currChangeDetails)) {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
           console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
         }
         throw new Error(JSON.stringify({ "statusCode": "201", "details": currChangeDetails }));
-      } else
+      } else if ((changeState == "failed") || (changeState == "error")) {
+        throw new Error(JSON.stringify({ "status": "error", "details": currChangeDetails.details }));
+      } else if (changeState == "rejected" || changeState == "canceled_by_user") {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+          console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
+        }
         throw new Error("202");
+      }
     }
-
-    if (responseCode == 200) {
+    else if (responseCode == 200) {
+      if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+        console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
+      }
       console.log('\n****Change is Approved.');
     }
-  } else
+  }
+  else
     throw new Error("500");
 
   return true;
 }
+
 function isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails) {
   if (Object.keys(currChangeDetails).length !== Object.keys(prevPollChangeDetails).length) {
     return true;
