@@ -30,7 +30,7 @@ jobs:
   changeApproval:
     name: ServiceNow Change Approval
     needs: build
-    runs-on: ubutun-latest
+    runs-on: ubuntu-latest
 
     steps:     
       - name: ServiceNow Change Approval
