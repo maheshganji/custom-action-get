@@ -5146,7 +5146,11 @@ async function createChange({
                 if (!retry) {
                     core.debug("[ServiceNow DevOps], Receiving response for Create Change, Response :" + circularSafeStringify(response) + "\n");
                 }
-                await new Promise((resolve) => setTimeout(resolve, 30000));
+                await new Promise((resolve) => setTimeout(resolve, 30));
+
+                console.log("we are having error Message Details"+ errMsg);
+                console.log("we are having error Message Details2");
+                
             }
         }
         if (status) {
