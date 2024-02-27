@@ -5138,6 +5138,7 @@ async function createChange({
                 }
                 if (errMsg.indexOf('Waiting for Inbound Event') == -1) {
                     retry = true;
+                    console.log("Enterting the waiting for inbound event if block");
                 } else if (attempts >= 3) {
                     retry = false;
                 } else if (errMsg.indexOf('callbackURL') == -1) {
@@ -5146,10 +5147,10 @@ async function createChange({
                 if (!retry) {
                     core.debug("[ServiceNow DevOps], Receiving response for Create Change, Response :" + circularSafeStringify(response) + "\n");
                 }
-                await new Promise((resolve) => setTimeout(resolve, 30));
+                await new Promise((resolve) => setTimeout(resolve, 30000));
 
-                console.log("we are having error Message Details"+ errMsg);
-                console.log("we are having error Message Details2");
+                console.log("we are having error Message Details: "+ errMsg);
+                console.log("Attempt number" + attempts);
                 
             }
         }
