@@ -34,7 +34,7 @@ jobs:
 
     steps:     
       - name: ServiceNow Change Approval
-        uses: maheshganji/custom-action-get@master
+        uses: ServiceNow/servicenow-devops-change@dev
         id: create
         with:
           devops-integration-token: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
