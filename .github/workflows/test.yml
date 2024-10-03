@@ -6,6 +6,7 @@ on:
     branches:
       - master
       - main
+      - test03
 jobs:
 
   build:
