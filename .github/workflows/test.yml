@@ -44,10 +44,14 @@ jobs:
         # Orchestration Tool Id
         tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
       
-    env:
-        #if: github.event.pull_request.merged == true
-        name: Deploy
-        environment: PROD
-        needs: sonarSummary
-        runs-on: ubuntu-latest
+  deploy:
+    environment: PROD
+    needs: sonarSummary
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo Run deployment.
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
       
