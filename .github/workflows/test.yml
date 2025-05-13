@@ -44,12 +44,10 @@ jobs:
         # Orchestration Tool Id
         tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
       
-    deploy:
+    env:
         #if: github.event.pull_request.merged == true
         name: Deploy
         environment: PROD
         needs: sonarSummary
         runs-on: ubuntu-latest
-        steps:
-            - name: Run deployment scripts
-              run: echo Completed running deployment script
+      
