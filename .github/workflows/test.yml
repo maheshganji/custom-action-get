@@ -1,57 +1,78 @@
 # This workflow uses ServiceNow custom actions that are certified by ServiceNow.
-name: CICD GitHub workflow
 
-on: workflow_dispatch
-# on:
-#   push:
-#     branches: [ "main" ]
-#   pull_request:
-#     branches: [ "main" ]
-#     types: [opened, synchronize, reopened]
+name: Github Sonar and Security Demo
+on:   workflow_dispatch
 
-# env:
-#   FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: true
 
 jobs:
-  
-  sonarSummary:
-    name: 'SonarCloud Scan Summary'
+  build:
+    name: 'Build'
     runs-on: ubuntu-latest
-    steps:
-    # - name: Set up Node.js
-    #   uses: actions/setup-node@v3
-    #   with:
-    #     node-version: '20'    
-    - name: ServiceNow DevOps Security Results
-    # You may pin to the exact commit or the version.
-    # uses: ServiceNow/servicenow-devops-security-result@26f3416768ffd3991f1a14c0304ba03075724929
-      uses: ServiceNow/servicenow-devops-security-result@scratch/node20update
-      with:
-        # ServiceNow Instance URL
-        instance-url: ${{ secrets.SN_INSTANCE_URL }}
-        # Devops Integration User Name
-        #devops-integration-user-name: # optional
-        # Devops Integration User Password
-        #devops-integration-user-password: # optional
-        # Devops Integration Token
-        devops-integration-token: ${{ secrets.SN_DEVOPS_TOKEN }} # optional
-        # Github Context
-        context-github: ${{ toJSON(github) }}
-        # Display Name of the Job
-        job-name: 'Veracode Scan Summary'
-        # Security Results Attributes: For more information on defining the security attributes, View full Marketplace listing link above
-        security-result-attributes: '{ "scanner": "Veracode", "applicationName": "10kflaws-72", "securityToolId": "" }'
-        # Orchestration Tool Id
-        tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
-      
-  deploy:
-    environment: PROD
-    needs: sonarSummary
-    name: Deploy
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo Run deployment.
-      - name: Checkout Code
-        uses: actions/checkout@v2
 
-      
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        cache: maven
+    - name: Build with Maven
+      run: mvn clean compile
+
+
+  sonarScan:
+   name: 'Sonar Scan'
+   needs: build
+   runs-on: ubuntu-latest
+   steps:
+   - name: Checkout
+     uses: actions/checkout@v4.0.0
+  
+   - name: ServiceNow DevOps Sonar Scan Results
+   # You may pin to the exact commit or the version.     
+     uses: ServiceNow/servicenow-devops-sonar@dev
+     with:
+         # ServiceNow Instance URL
+         instance-url: ${{ secrets.SN_INSTANCE_URL }}
+         # Devops Integration Token
+         # devops-integration-user-name: '${{ secrets.SN_DEVOPS_USER }}'
+         # devops-integration-user-password: '${{ secrets.SN_DEVOPS_PASSWORD }}'
+         devops-integration-token: ${{ secrets.SN_DEVOPS_TOKEN }}
+         # Orchestration Tool Id
+         tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
+         # Github Context
+         context-github: ${{ toJSON(github) }}
+         # Display Name of the Job
+         job-name: 'Sonar Scan'
+         # Sonar Host URL
+         sonar-host-url: ${{ secrets.SONAR_URL }}
+         # Sonar Project Key
+         sonar-project-key: ${{ secrets.SONAR_PROJECT_KEY }}
+
+  ServiceNowSecurityScanResults:
+    # type of machine to run the job on
+    runs-on: ubuntu-latest
+    name: ServiceNow Security Scan Results
+    needs: sonarScan
+    steps:
+      - name: ServiceNow DevOps Security Results
+        uses: ServiceNow/servicenow-devops-security-result@main
+        with:
+            # DevOps Integration Token of GitHub tool created in ServiceNow instance for token based authentication.
+            devops-integration-token: ${{ secrets.SN_DEVOPS_TOKEN }}
+            # devops-integration-user-name: '${{ secrets.SN_DEVOPS_USER }}'
+            # devops-integration-user-password: '${{ secrets.SN_DEVOPS_PASSWORD }}'
+            # ServiceNow Instance URL
+            instance-url: ${{ secrets.SN_INSTANCE_URL }}
+            # Orchestration Tool Id
+            tool-id: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
+            # GitHub Context
+            context-github: ${{ toJSON(github) }}
+            # Display Name of the Job
+            job-name: 'ServiceNow Security Scan Results'
+            security-result-attributes: '{"scanner": "Veracode", "applicationName": "10kflaws-72"}'
+            scanner: Scanning tool and is required e.g. Veracode.
+            applicationName: Name of your Veracode application and is required. This attribute is applicable only for Veracode.
+            buildVersion: Veracode Scan name / build version and is optional. This attribute is applicable only for Veracode.
+            securityToolId: Security tool onboarded in ServiceNow (sys_id of the onboarded security tool) and is optional.
