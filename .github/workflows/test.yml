@@ -37,9 +37,18 @@ jobs:
         job-name: 'Sonar Scan'
         sonar-host-url: ${{ secrets.SONAR_URL }}
         sonar-project-key: ${{ secrets.SONAR_PROJECT_KEY }}
+  
+  wait:
+    name: 'Wait for 2 Minutes'
+    needs: sonarScan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Sleep for 2 minutes
+      run: sleep 120
+      
   change:
     name: Change Request
-    needs: sonarScan
+    needs: wait
     runs-on: ubuntu-latest
     steps:     
       - name: ServiceNow DevOps Change Attributes
@@ -59,10 +68,3 @@ jobs:
 
   
 
-  # wait:
-  #   name: 'Wait for 2 Minutes'
-  #   needs: sonarScan
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - name: Sleep for 2 minutes
-  #     run: sleep 120
