@@ -1,6 +1,6 @@
 # This workflow uses ServiceNow custom actions that are certified by ServiceNow.
 
-name: Github Sonar and Security Demo
+name: Github Sonar and Security Demo 123
 on: workflow_dispatch
 
 jobs:
