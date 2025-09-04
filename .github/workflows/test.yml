@@ -52,7 +52,7 @@ jobs:
   change:
     name: 'Change Request'
     if: always()
-    needs: registerPackage
+    needs: sonarScan
     runs-on: ubuntu-latest
     steps:     
       - name: ServiceNow DevOps Change Attributes
