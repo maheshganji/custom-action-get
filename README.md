@@ -2,6 +2,12 @@
 
 This custom action needs to be added at step level in a job to create change in ServiceNow instance. Using this custom action in parallel jobs is not supported.
 
+## Features
+- Automated change creation in ServiceNow
+- Integration with GitHub Actions workflow
+- Configurable timeout and polling intervals
+- Support for custom change attributes
+
 
 
 # Usage
