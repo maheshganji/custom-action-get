@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      SERVICENOW_INSTANCE: ${{ vars.SN_INSTANCE_URL }}
+      SERVICENOW_INSTANCE: ${{ secrets.SN_INSTANCE_URL }}
       SERVICENOW_TOKEN: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
-      TOOL_ID: ${{ vars.SN_ORCHESTRATION_TOOL_ID }}
+      TOOL_ID: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
 
     steps:
       # Checkout code from selected branch
