@@ -59,8 +59,7 @@ jobs:
                 "start_date": "2025-11-11 08:15:43",
                 "end_date": "2025-11-11 15:16:06"
               },
-              "setCloseCode": "true",
-              "autoCloseChange": false
+              "setCloseCode": "true"
             }
 
       # Validate ServiceNow Change Number was returned
