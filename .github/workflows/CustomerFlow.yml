@@ -35,29 +35,12 @@ jobs:
           tool-id: ${{ env.SN_TOOL_ID }}
           context-github: ${{ toJSON(github) }}
           job-name: 'ServiceNow DevOps Change'
-          interval: '100'
-          timeout: '3600'
-          changeCreationTimeOut: '3600'
-          abortOnChangeCreationFailure: true
-          abortOnChangeStepTimeout: true
           change-request: >
             {
               "attributes": {
-                "requested_by": "b59f9d2c334316d042d4acf57d5c7b31",
-                "assignment_group": "2bea999287c04210a1fe670a0cbb353f",
-                "cmdb_ci": "0d31a33f1bce555088f11023b24bcb3f",
-                "business_service": "0d31a33f1bce555088f11023b24bcb3f",
                 "short_description": "GitHub-triggered production deployment",
                 "description": "GitHub Actions workflow creating a ServiceNow Change Request for production deployment.",
-                "justification": "Automated change creation for CI/CD deployment",
-                "risk": "low",
-                "impact": "low",
-                "implementation_plan": "Automated deployment via GitHub Actions",
-                "backout_plan": "Rollback previous deployment if needed",
-                "test_plan": "Post-deployment smoke test validation",
-                "risk_impact_analysis": "Low-risk deployment process",
-                "start_date": "2025-11-11 08:15:43",
-                "end_date": "2025-11-11 15:16:06"
+                "justification": "Automated change creation for CI/CD deployment"
               },
               "setCloseCode": "true"
             }
