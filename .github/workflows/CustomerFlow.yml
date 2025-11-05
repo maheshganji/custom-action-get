@@ -5,65 +5,68 @@ on:
 
 jobs:
   deploy-prod:
-    name: Deploy to Production & ServiceNow Change demo
+    name: Deploy to Production & ServiceNow Change Demo
     runs-on: ubuntu-latest
 
     env:
-      SERVICENOW_INSTANCE: ${{ secrets.SN_INSTANCE_URL }}
-      SERVICENOW_TOKEN: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
-      TOOL_ID: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
+      # Environment variables pulled from GitHub Secrets
+      SN_INSTANCE_URL: ${{ secrets.SN_INSTANCE_URL }}
+      SN_DEVOPS_TOKEN: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
+      SN_TOOL_ID: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
 
     steps:
-      # Checkout code from selected branch
+      # Checkout code from the selected branch
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Enable debug logging for detailed troubleshooting
       - name: Enable debug logging
         run: |
           echo "ACTIONS_STEP_DEBUG=true" >> $GITHUB_ENV
           echo "ACTIONS_RUNNER_DEBUG=true" >> $GITHUB_ENV
-      # Create ServiceNow Change Request using token + tool ID
+
+      # Create ServiceNow Change Request
       - name: Create ServiceNow Change Request
         id: create-change
         uses: ServiceNow/servicenow-devops-change@v6.1.0
         with:
-          instance-url: ${{ env.SERVICENOW_INSTANCE }}
-          devops-integration-token: ${{ env.SERVICENOW_TOKEN }}
-          tool-id: ${{ env.TOOL_ID }}
+          instance-url: ${{ env.SN_INSTANCE_URL }}
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
+          tool-id: ${{ env.SN_TOOL_ID }}
           context-github: ${{ toJSON(github) }}
           job-name: 'ServiceNow DevOps Change'
-          change-request: >
-            {
-            "attributes": {
-              "requested_by": "b59f9d2c334316d042d4acf57d5c7b31",
-              "assignment_group": "2bea999287c04210a1fe670a0cbb353f",
-              "cmdb_ci":"0d31a33f1bce555088f11023b24bcb3f",
-              "business_service": "0d31a33f1bce555088f11023b24bcb3f",
-              "u_it_security_risk_or_vulnerability": "no",
-              "short_description": "GitHub change",
-              "risk": "low",
-              "impact": "low",
-              "description": "GitHub change",
-              "justification": "Test",
-              "implementation_plan": "Test",
-              "backout_plan": "Test",
-              "test_plan": "Test",
-              "risk_impact_analysis": "Test",
-              "start_date": "2025-11-11 08:15:43",
-              "end_date":"2024-11-11 15:16:06"
-              },
-              "setCloseCode": "true",
-              "autoCloseChange": false
-            }
           interval: '100'
           timeout: '3600'
           changeCreationTimeOut: '3600'
           abortOnChangeCreationFailure: true
           abortOnChangeStepTimeout: true
+          change-request: >
+            {
+              "attributes": {
+                "requested_by": "b59f9d2c334316d042d4acf57d5c7b31",
+                "assignment_group": "2bea999287c04210a1fe670a0cbb353f",
+                "cmdb_ci": "0d31a33f1bce555088f11023b24bcb3f",
+                "business_service": "0d31a33f1bce555088f11023b24bcb3f",
+                "short_description": "GitHub-triggered production deployment",
+                "description": "GitHub Actions workflow creating a ServiceNow Change Request for production deployment.",
+                "justification": "Automated change creation for CI/CD deployment",
+                "risk": "low",
+                "impact": "low",
+                "implementation_plan": "Automated deployment via GitHub Actions",
+                "backout_plan": "Rollback previous deployment if needed",
+                "test_plan": "Post-deployment smoke test validation",
+                "risk_impact_analysis": "Low-risk deployment process",
+                "start_date": "2025-11-11 08:15:43",
+                "end_date": "2025-11-11 15:16:06"
+              },
+              "setCloseCode": "true",
+              "autoCloseChange": false
+            }
 
+      # Validate ServiceNow Change Number was returned
       - name: Validate ServiceNow Change Number
         id: validate-change
-        if: failure() || success()
+        if: always()
         run: |
           echo "Step outputs:"
           echo '${{ toJSON(steps.create-change.outputs) }}'
@@ -74,20 +77,22 @@ jobs:
           else
             echo "✅ Change number received: ${{ steps.create-change.outputs['change-request-number'] }}"
           fi
-      # Simulate deployment (replace with your real commands)
+
+      # Simulate deployment (replace with your real deployment commands)
       - name: Deploy to Production
         run: |
-          echo "Deploying application ${{ env.APPLICATION_NAME }} to ${{ github.event.inputs.environment }}..."
-          # Replace with your real deployment commands
+          echo "🚀 Starting production deployment..."
+          # Replace this with real deployment logic
           sleep 2
-          echo "Deployment complete!"
+          echo "✅ Deployment completed successfully!"
+
       # Update ServiceNow Change Request to "Implemented" after success
       - name: Update ServiceNow Change to Implemented
         if: success() && steps.create-change.outputs['change-request-number'] != ''
         uses: ServiceNow/servicenow-devops-update-change@v5.1.0
         with:
-          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
           instance-url: ${{ env.SN_INSTANCE_URL }}
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
           tool-id: ${{ env.SN_TOOL_ID }}
           change-request-number: ${{ steps.create-change.outputs['change-request-number'] }}
           context-github: ${{ toJSON(github) }}
@@ -99,13 +104,14 @@ jobs:
                 "work_notes": "Deployment completed successfully via GitHub Actions."
               }
             }
-      # Handle Deployment Failures — mark change as failed
+
+      # Handle deployment failures by marking change as "Review"
       - name: Mark Change as Failed
         if: failure() && steps.create-change.outputs['change-request-number'] != ''
         uses: ServiceNow/servicenow-devops-update-change@v5.1.0
         with:
-          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
           instance-url: ${{ env.SN_INSTANCE_URL }}
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
           tool-id: ${{ env.SN_TOOL_ID }}
           change-request-number: ${{ steps.create-change.outputs['change-request-number'] }}
           context-github: ${{ toJSON(github) }}
@@ -114,6 +120,6 @@ jobs:
             {
               "attributes": {
                 "state": "Review",
-                "work_notes": "Deployment failed. Please review logs and take corrective actions."
+                "work_notes": "Deployment failed. Please review GitHub Actions logs and investigate."
               }
             }
