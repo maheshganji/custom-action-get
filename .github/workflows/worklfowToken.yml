@@ -46,11 +46,7 @@ jobs:
       - name: Output of Change Creation
         run: echo "change-request-number = ${{ steps.create.outputs.change-request-number }}" >> $GITHUB_OUTPUT
 
-  deploy:
-    name: Deploy
-    needs: changeApproval
-    runs-on: ubuntu-latest
-    environment: PROD
+
     steps:
       - name: Run deployment scripts
         run: echo "Completed Deployment."
