@@ -1,0 +1,102 @@
+name: Manual Deploy to Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-prod:
+    name: Deploy to Production & ServiceNow Change Demo
+    runs-on: ubuntu-latest
+
+    env:
+      # Environment variables pulled from GitHub Secrets
+      SN_INSTANCE_URL: ${{ secrets.SN_INSTANCE_URL }}
+      SN_DEVOPS_TOKEN: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
+      SN_TOOL_ID: ${{ secrets.SN_ORCHESTRATION_TOOL_ID }}
+
+    steps:
+      # Checkout code from the selected branch
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Enable debug logging for detailed troubleshooting
+      - name: Enable debug logging
+        run: |
+          echo "ACTIONS_STEP_DEBUG=true" >> $GITHUB_ENV
+          echo "ACTIONS_RUNNER_DEBUG=true" >> $GITHUB_ENV
+
+      # Create ServiceNow Change Request   
+      - name: ServiceNow Change
+        uses: ServiceNow/servicenow-devops-change@v6.1.0
+        with:
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
+          instance-url: ${{ env.SN_INSTANCE_URL }}
+          tool-id: ${{ env.SN_TOOL_ID }}
+          context-github: ${{ toJSON(github) }}
+          job-name: 'Deploy to Production & ServiceNow Change Demo'
+          change-request: '{"setCloseCode":"true","autoCloseChange":true,"attributes":{"short_description":"Automated Software Deployment","description":"Automated Software Deployment.","assignment_group":"a715cd759f2002002920bde8132e7018","implementation_plan":"Software update is tested and results can be found in Test Summaries Tab; When the change is approved the implementation happens automated by the CICD pipeline within the change planned start and end time window.","backout_plan":"When software fails in production, the previous software release will be re-deployed.","test_plan":"Testing if the software was successfully deployed"}}'
+          interval: '100'
+          timeout: '3600'
+          changeCreationTimeOut: '3600'
+          abortOnChangeCreationFailure: 'true'
+
+      # Validate ServiceNow Change Number was returned
+      - name: Validate ServiceNow Change Number
+        id: validate-change
+        if: always()
+        run: |
+          echo "Step outputs:"
+          echo '${{ toJSON(steps.create-change.outputs) }}'
+          echo "Checking if ServiceNow change number was returned..."
+          if [ -z "${{ steps.create-change.outputs['change-request-number'] }}" ]; then
+            echo "❌ No change number received from ServiceNow. Aborting workflow."
+            exit 1
+          else
+            echo "✅ Change number received: ${{ steps.create-change.outputs['change-request-number'] }}"
+          fi
+
+      # Simulate deployment (replace with your real deployment commands)
+      - name: Deploy to Production
+        run: |
+          echo "🚀 Starting production deployment..."
+          # Replace this with real deployment logic
+          sleep 2
+          echo "✅ Deployment completed successfully!"
+
+      # Update ServiceNow Change Request to "Implemented" after success
+      - name: Update ServiceNow Change to Implemented
+        if: success() && steps.create-change.outputs['change-request-number'] != ''
+        uses: ServiceNow/servicenow-devops-update-change@v5.1.0
+        with:
+          instance-url: ${{ env.SN_INSTANCE_URL }}
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
+          tool-id: ${{ env.SN_TOOL_ID }}
+          change-request-number: ${{ steps.create-change.outputs['change-request-number'] }}
+          context-github: ${{ toJSON(github) }}
+          job-name: Deploy
+          change-request: >
+            {
+              "attributes": {
+                "state": "Implemented",
+                "work_notes": "Deployment completed successfully via GitHub Actions."
+              }
+            }
+
+      # Handle deployment failures by marking change as "Review"
+      - name: Mark Change as Failed
+        if: failure() && steps.create-change.outputs['change-request-number'] != ''
+        uses: ServiceNow/servicenow-devops-update-change@v5.1.0
+        with:
+          instance-url: ${{ env.SN_INSTANCE_URL }}
+          devops-integration-token: ${{ env.SN_DEVOPS_TOKEN }}
+          tool-id: ${{ env.SN_TOOL_ID }}
+          change-request-number: ${{ steps.create-change.outputs['change-request-number'] }}
+          context-github: ${{ toJSON(github) }}
+          job-name: Deploy
+          change-request: >
+            {
+              "attributes": {
+                "state": "Review",
+                "work_notes": "Deployment failed. Please review GitHub Actions logs and investigate."
+              }
+            }
