@@ -3,7 +3,7 @@
 This custom action needs to be added at step level in a job to create change in ServiceNow instance. Using this custom action in parallel jobs is not supported.
 
 
-
+ds
 # Usage
 ## Step 1: Prepare values for setting up your secrets for Actions
 - credentials (username and password for a ServiceNow devops integration user)
@@ -117,7 +117,11 @@ Initially, ServiceNow product management and engineering representatives will ow
 
 
 Test Commit
+update for new branch
 
 commit for automation
 
 test commit
+
+Commit to test mail
+commit for the test mail 2
