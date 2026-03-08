@@ -7,10 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Building..."
+      - run: echo "Building...1"
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Deploying..."
+      - run: echo "Deploying...2"
