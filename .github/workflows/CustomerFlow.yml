@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  # HTTPS_PROXY: http://98.93.163.190
+  HTTPS_PROXY: http://98.93.163.190:3128
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
@@ -47,13 +47,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # - name: Verify Proxy Connectivity
-      #   run: |
-      #     echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
-      #     curl -x $HTTPS_PROXY -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://www.google.com || echo "Proxy connectivity check failed"
+      - name: Verify Proxy Connectivity
+        run: |
+          echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
+          curl -x $HTTPS_PROXY -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://www.google.com || echo "Proxy connectivity check failed"
 
       - name: ServiceNow Change Approval
-        uses: ServiceNow/servicenow-devops-change@main
+        uses: ServiceNow/servicenow-devops-change@feature/https-proxy-agent
         id: create
         with:
           devops-integration-token: ${{ secrets.SN_DEVOPS_INTEGRATION_TOKEN }}
