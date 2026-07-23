@@ -47,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Verify Proxy Connectivity
-        run: |
-          echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
-          curl -x $HTTPS_PROXY -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://www.google.com || echo "Proxy connectivity check failed"
+      # - name: Verify Proxy Connectivity
+      #   run: |
+      #     echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
+      #     curl -x $HTTPS_PROXY -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://www.google.com || echo "Proxy connectivity check failed"
 
       - name: ServiceNow Change Approval
         uses: ServiceNow/servicenow-devops-change@main
