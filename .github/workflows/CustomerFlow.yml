@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 env:
-  HTTPS_PROXY: http://98.93.163.190:3128
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
@@ -46,7 +45,28 @@ jobs:
     needs: dummy-step-2
     runs-on: ubuntu-latest
 
+    services:
+      squid:
+        image: ubuntu/squid:latest
+        ports:
+          - 3128:3128
+
+    env:
+      HTTPS_PROXY: http://localhost:3128
+
     steps:
+      - name: Wait for Squid to start
+        run: |
+          echo "Waiting for Squid proxy to be ready..."
+          for i in $(seq 1 30); do
+            if curl -x http://localhost:3128 -s -o /dev/null -w "%{http_code}" https://www.google.com 2>/dev/null | grep -q '200'; then
+              echo "Squid proxy is ready!"
+              break
+            fi
+            echo "Attempt $i: waiting..."
+            sleep 2
+          done
+
       - name: Verify Proxy Connectivity
         run: |
           echo "HTTPS_PROXY is set to: $HTTPS_PROXY"
@@ -67,6 +87,10 @@ jobs:
           changeCreationTimeOut: '3600'
           abortOnChangeCreationFailure: true
           abortOnChangeStepTimeout: true
+
+      - name: Show Squid Proxy Access Logs
+        if: always()
+        run: docker logs $(docker ps -aq --filter "ancestor=ubuntu/squid:latest") 2>&1 | grep -E "CONNECT|TCP" || echo "No proxy logs found"
 
       - name: Output of Change Creation
         run: echo "change-request-number=${{ steps.create.outputs.change-request-number }} change-request-sys-id=${{ steps.create.outputs.change-request-sys-id }}"
