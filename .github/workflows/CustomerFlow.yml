@@ -107,7 +107,7 @@ jobs:
       change-request-number: '${{ steps.get_change.outputs.change-request-number }}'
     steps:
       - name: ServiceNow DevOps Get Change
-        uses: ServiceNow/servicenow-devops-get-change@CSTASK1513682
+        uses: ServiceNow/servicenow-devops-get-change@feature/https-proxy-agent
         id: get_change
         with:
           instance-url: '${{ secrets.SN_INSTANCE_URL }}'
@@ -129,7 +129,7 @@ jobs:
     if: always()
     steps:
       - name: ServiceNow DevOps Update Change
-        uses: ServiceNow/servicenow-devops-update-change@CSTASK1513682
+        uses: ServiceNow/servicenow-devops-update-change@feature/https-proxy-agent
         id: update_change
         with:
           instance-url: '${{ secrets.SN_INSTANCE_URL }}'
