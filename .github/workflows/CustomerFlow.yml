@@ -95,6 +95,54 @@ jobs:
       - name: Output of Change Creation
         run: echo "change-request-number=${{ steps.create.outputs.change-request-number }} change-request-sys-id=${{ steps.create.outputs.change-request-sys-id }}"
 
+
+
+
+  getchange:
+    needs: changeApproval
+    runs-on: ubuntu-latest
+    if: always()
+    name: ServiceNow DevOps Get Change
+    outputs:
+      change-request-number: '${{ steps.get_change.outputs.change-request-number }}'
+    steps:
+      - name: ServiceNow DevOps Get Change
+        uses: ServiceNow/servicenow-devops-get-change@CSTASK1513682
+        id: get_change
+        with:
+          instance-url: '${{ secrets.SN_INSTANCE_URL }}'
+          # devops-integration-user-name: '${{ secrets.SN_DEVOPS_USER }}'
+          # devops-integration-user-password: '${{ secrets.SN_DEVOPS_PASSWORD }}'
+          devops-integration-token: '${{ secrets.SN_DEVOPS_TOKEN }}'
+          tool-id: '${{ secrets.SN_ORCHESTRATION_TOOL_ID }}'
+          context-github: '${{ toJSON(github) }}'
+          change-details: '{"build_number":"","pipeline_name":"","stage_name":"Change Request"}'
+      - name: Output of ServiceNow DevOps Get Change
+        run: >-
+          echo 'Output of ServiceNow DevOps Get Change is ->
+          change-request-number = ${{
+          steps.get_change.outputs.change-request-number }}' >> $GITHUB_OUTPUT
+  updatechange:
+    needs: getchange
+    runs-on: ubuntu-latest
+    name: ServiceNow DevOps Update Change
+    if: always()
+    steps:
+      - name: ServiceNow DevOps Update Change
+        uses: ServiceNow/servicenow-devops-update-change@CSTASK1513682
+        id: update_change
+        with:
+          instance-url: '${{ secrets.SN_INSTANCE_URL }}'
+          # devops-integration-user-name: '${{ secrets.SN_DEVOPS_USER }}'
+          # devops-integration-user-password: '${{ secrets.SN_DEVOPS_PASSWORD }}'
+          devops-integration-token: '${{ secrets.SN_DEVOPS_TOKEN }}'
+          tool-id: '${{ secrets.SN_ORCHESTRATION_TOOL_ID }}'
+          context-github: '${{ toJSON(github) }}'
+          change-request-number: '${{needs.getchange.outputs.change-request-number}}'
+          change-request-details: >-
+            {"state":"3","close_code":"successful_issues","close_notes":"Test
+            results successful with upadate change step"}
+
   deploy:
     name: Deploy
     needs: changeApproval
