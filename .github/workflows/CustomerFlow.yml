@@ -116,7 +116,7 @@ jobs:
           devops-integration-token: '${{ secrets.SN_DEVOPS_TOKEN }}'
           tool-id: '${{ secrets.SN_ORCHESTRATION_TOOL_ID }}'
           context-github: '${{ toJSON(github) }}'
-          change-details: '{"build_number":"","pipeline_name":"","stage_name":"Change Request"}'
+          change-details: '{"build_number":"","pipeline_name":"","stage_name":"ServiceNow Change Approval"}'
       - name: Output of ServiceNow DevOps Get Change
         run: >-
           echo 'Output of ServiceNow DevOps Get Change is ->
@@ -140,8 +140,7 @@ jobs:
           context-github: '${{ toJSON(github) }}'
           change-request-number: '${{needs.getchange.outputs.change-request-number}}'
           change-request-details: >-
-            {"state":"3","close_code":"successful_issues","close_notes":"Test
-            results successful with upadate change step"}
+            {"state":"3","close_code":"successful_issues","close_notes":"Test results successful with upadate change step"}
 
   deploy:
     name: Deploy
