@@ -1,0 +1,507 @@
+#!/usr/bin/env bash
+# .git/hooks/pre-push
+#
+# Runs before every `git push` to any branch.
+# Checks performed:
+#   1. Lint (if configured)
+#   2. Tests (if configured)
+#   3. Hardcoded credentials / tokens / API keys — blocks push on any match
+#   4. New files / folders — warns and asks for confirmation
+#
+# Install:
+#   cp pre-push .git/hooks/pre-push
+#   chmod +x .git/hooks/pre-push
+
+set -euo pipefail
+
+# ── colours ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+YEL='\033[0;33m'
+GRN='\033[0;32m'
+CYN='\033[0;36m'
+BLD='\033[1m'
+RST='\033[0m'
+
+info()  { echo -e "${CYN}[pre-push]${RST} $*"; }
+ok()    { echo -e "${GRN}[pre-push] ✔${RST} $*"; }
+warn()  { echo -e "${YEL}[pre-push] ⚠${RST} $*"; }
+fail()  { echo -e "${RED}[pre-push] ✖${RST} $*" >&2; }
+abort() { fail "$*"; exit 1; }
+
+# ── read push info from stdin ──────────────────────────────────────────────────
+# Git passes:  <local-ref> <local-sha1> <remote-ref> <remote-sha1>
+LOCAL_REF=""
+LOCAL_SHA=""
+REMOTE_SHA=""
+REMOTE_NAME=""  # e.g. "origin"
+REMOTE_URL=""   # e.g. git@github.com:user/repo.git
+
+# Hook receives remote name and URL as args $1 $2
+REMOTE_NAME="${1:-origin}"
+REMOTE_URL="${2:-}"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  LOCAL_REF="$local_ref"
+  LOCAL_SHA="$local_sha"
+  REMOTE_SHA="$remote_sha"
+done
+
+# Nothing to push (e.g. deleting a remote branch)
+[[ -z "$LOCAL_SHA" ]] && exit 0
+
+# ── determine the comparison base ─────────────────────────────────────────────
+# If the remote branch doesn't exist yet, diff against the repo's first commit
+# so we catch every file on a brand-new branch push.
+ZERO_SHA="0000000000000000000000000000000000000000"
+if [[ "$REMOTE_SHA" == "$ZERO_SHA" ]]; then
+  # New remote branch — diff from the very first commit (or empty tree if none)
+  FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+  if [[ -n "$FIRST_COMMIT" ]]; then
+    COMPARE_BASE="${FIRST_COMMIT}^"  # parent of first commit = empty tree
+    # git diff against empty tree uses the special empty-tree object
+    COMPARE_BASE=$(git hash-object -t tree /dev/null)
+  else
+    COMPARE_BASE=$(git hash-object -t tree /dev/null)
+  fi
+else
+  COMPARE_BASE="$REMOTE_SHA"
+fi
+
+echo ""
+info "Checking push: ${BLD}${LOCAL_REF}${RST} → ${BLD}${REMOTE_NAME}${RST}"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 1 — LINT
+# ══════════════════════════════════════════════════════════════════════════════
+run_lint() {
+  # Detect and run the appropriate linter.
+  # Add / remove linters to suit your project.
+
+  if [[ -f "package.json" ]]; then
+    if jq -e '.scripts.lint' package.json &>/dev/null; then
+      info "Running npm lint…"
+      npm run lint --silent || abort "Lint failed. Fix errors before pushing."
+      ok "Lint passed."
+      return
+    fi
+  fi
+
+  if [[ -f ".eslintrc" || -f ".eslintrc.js" || -f ".eslintrc.json" || -f "eslint.config.js" ]]; then
+    info "Running ESLint…"
+    npx eslint . || abort "ESLint found issues. Fix them before pushing."
+    ok "ESLint passed."
+    return
+  fi
+
+  if [[ -f "pyproject.toml" || -f "setup.cfg" ]]; then
+    if command -v ruff &>/dev/null; then
+      info "Running ruff…"
+      ruff check . || abort "Ruff lint failed. Fix errors before pushing."
+      ok "Ruff passed."
+      return
+    fi
+    if command -v flake8 &>/dev/null; then
+      info "Running flake8…"
+      flake8 . || abort "flake8 found issues. Fix them before pushing."
+      ok "flake8 passed."
+      return
+    fi
+  fi
+
+  if [[ -f "Gemfile" ]] && command -v rubocop &>/dev/null; then
+    info "Running RuboCop…"
+    rubocop || abort "RuboCop found issues. Fix them before pushing."
+    ok "RuboCop passed."
+    return
+  fi
+
+  # No linter detected — skip silently.
+  info "No linter detected, skipping lint check."
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 2 — TESTS
+# ══════════════════════════════════════════════════════════════════════════════
+run_tests() {
+  if [[ -f "package.json" ]]; then
+    if jq -e '.scripts.test' package.json &>/dev/null; then
+      info "Running npm test…"
+      npm test --silent || abort "Tests failed. All tests must pass before pushing."
+      ok "Tests passed."
+      return
+    fi
+  fi
+
+  if [[ -f "pytest.ini" || -f "pyproject.toml" || -f "setup.cfg" ]]; then
+    if command -v pytest &>/dev/null; then
+      info "Running pytest…"
+      pytest -q || abort "pytest failed. Fix failing tests before pushing."
+      ok "pytest passed."
+      return
+    fi
+  fi
+
+  if [[ -f "Makefile" ]] && grep -q "^test:" Makefile 2>/dev/null; then
+    info "Running make test…"
+    make test || abort "make test failed. Fix issues before pushing."
+    ok "Tests passed."
+    return
+  fi
+
+  if [[ -f "Gemfile" ]] && command -v rspec &>/dev/null; then
+    info "Running RSpec…"
+    rspec || abort "RSpec tests failed. Fix them before pushing."
+    ok "RSpec passed."
+    return
+  fi
+
+  if command -v go &>/dev/null && [[ -f "go.mod" ]]; then
+    info "Running go test…"
+    go test ./... || abort "Go tests failed. Fix them before pushing."
+    ok "go test passed."
+    return
+  fi
+
+  info "No test runner detected, skipping test check."
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 3 — HARDCODED CREDENTIALS / TOKENS / API KEYS
+# ══════════════════════════════════════════════════════════════════════════════
+check_secrets() {
+  info "Scanning for hardcoded credentials…"
+
+  # ── files / extensions to always skip ────────────────────────────────────
+  # Add patterns here for files that are known-safe (lock files, compiled
+  # output, binary assets, etc.).
+  SKIP_PATTERNS=(
+    "*.lock"
+    "package-lock.json"
+    "yarn.lock"
+    "pnpm-lock.yaml"
+    "Gemfile.lock"
+    "poetry.lock"
+    "*.min.js"
+    "*.min.css"
+    "*.map"
+    "*.png" "*.jpg" "*.jpeg" "*.gif" "*.webp" "*.ico"
+    "*.woff" "*.woff2" "*.ttf" "*.eot"
+    "*.pdf" "*.zip" "*.tar" "*.gz"
+    "*.pyc" "*.class" "*.o" "*.a" "*.so" "*.dll" "*.exe"
+    ".git/*"
+    "vendor/*"
+    "node_modules/*"
+    "__pycache__/*"
+    ".env.example"       # placeholder files are fine
+    "*.example"
+    "*.sample"
+    "*.template"
+    "CHANGELOG*"
+    "LICENSE*"
+  )
+
+  # Build the grep --exclude / --exclude-dir flags dynamically
+  GREP_EXCLUDES=()
+  for pat in "${SKIP_PATTERNS[@]}"; do
+    GREP_EXCLUDES+=("--exclude=$pat")
+  done
+  GREP_EXCLUDES+=("--exclude-dir=.git" "--exclude-dir=node_modules" "--exclude-dir=vendor" "--exclude-dir=__pycache__")
+
+  # ── patterns to detect ───────────────────────────────────────────────────
+  # Each entry is:  "LABEL|||REGEX"
+  # The regex is passed to grep -E (extended regex), run against the diff of
+  # changed lines only (lines beginning with + in the diff, excluding the
+  # +++ file-name header lines).
+  #
+  # Tuning tips:
+  #   • Keep regexes specific enough to avoid false positives on comments /
+  #     docs that describe placeholder values.
+  #   • Add your own service tokens at the bottom of this array.
+
+  SECRET_PATTERNS=(
+    # ── Generic assignment patterns ─────────────────────────────────────
+    "Generic password assignment|||(?i)(password|passwd|pwd)\s*[:=]\s*['\"]?[^\s'\"]{8,}['\"]?"
+    "Generic secret assignment|||(?i)(secret|private_key|secret_key)\s*[:=]\s*['\"]?[^\s'\"]{8,}['\"]?"
+    "Generic token assignment|||(?i)(token|auth_token|access_token|api_token)\s*[:=]\s*['\"]?[a-zA-Z0-9+/_.~-]{16,}['\"]?"
+    "Generic API key assignment|||(?i)(api_key|apikey|api-key)\s*[:=]\s*['\"]?[a-zA-Z0-9+/_.~-]{16,}['\"]?"
+
+    # ── AWS ──────────────────────────────────────────────────────────────
+    "AWS Access Key ID|||AKIA[0-9A-Z]{16}"
+    "AWS Secret Access Key|||(?i)aws.{0,20}secret.{0,20}[:=]\s*['\"]?[a-zA-Z0-9+/]{40}['\"]?"
+    "AWS Session Token|||(?i)aws.{0,20}session.{0,20}token.{0,20}[:=]\s*['\"]?[a-zA-Z0-9+/]{100,}['\"]?"
+
+    # ── Google ───────────────────────────────────────────────────────────
+    "Google API Key|||AIza[0-9A-Za-z\-_]{35}"
+    "Google OAuth client secret|||(?i)google.{0,30}client.{0,10}secret.{0,10}[:=]\s*['\"]?[a-zA-Z0-9\-_]{24,}['\"]?"
+    "Google Service Account key file|||\"type\":\s*\"service_account\""
+
+    # ── GitHub ───────────────────────────────────────────────────────────
+    "GitHub Personal Access Token (classic)|||ghp_[a-zA-Z0-9]{36}"
+    "GitHub OAuth App token|||gho_[a-zA-Z0-9]{36}"
+    "GitHub App token|||ghs_[a-zA-Z0-9]{36}"
+    "GitHub Refresh token|||ghr_[a-zA-Z0-9]{76}"
+    "GitHub Fine-grained PAT|||github_pat_[a-zA-Z0-9_]{82}"
+
+    # ── Slack ─────────────────────────────────────────────────────────────
+    "Slack Bot token|||xoxb-[0-9]{11}-[0-9]{11}-[a-zA-Z0-9]{24}"
+    "Slack User token|||xoxp-[0-9]{11}-[0-9]{11}-[0-9]{11}-[a-zA-Z0-9]{32}"
+    "Slack Webhook URL|||hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8,}/[a-zA-Z0-9_]{24}"
+
+    # ── Stripe ────────────────────────────────────────────────────────────
+    "Stripe Live Secret Key|||sk_live_[a-zA-Z0-9]{24,}"
+    "Stripe Test Secret Key|||sk_test_[a-zA-Z0-9]{24,}"
+    "Stripe Restricted Key|||rk_live_[a-zA-Z0-9]{24,}"
+
+    # ── Twilio ────────────────────────────────────────────────────────────
+    "Twilio Account SID|||AC[a-fA-F0-9]{32}"
+    "Twilio Auth Token|||(?i)twilio.{0,20}auth.{0,10}token.{0,10}[:=]\s*['\"]?[a-fA-F0-9]{32}['\"]?"
+
+    # ── SendGrid ──────────────────────────────────────────────────────────
+    "SendGrid API Key|||SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"
+
+    # ── Anthropic ─────────────────────────────────────────────────────────
+    "Anthropic API Key|||sk-ant-[a-zA-Z0-9\-_]{93}"
+
+    # ── OpenAI ────────────────────────────────────────────────────────────
+    "OpenAI API Key|||sk-[a-zA-Z0-9]{48}"
+
+    # ── HuggingFace ───────────────────────────────────────────────────────
+    "HuggingFace Token|||hf_[a-zA-Z0-9]{34}"
+
+    # ── Azure ─────────────────────────────────────────────────────────────
+    "Azure Storage Connection String|||DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[^;]+"
+    "Azure SAS Token|||sv=[0-9]{4}-[0-9]{2}-[0-9]{2}&s[a-z]=.{10,}&sig=[a-zA-Z0-9%+/=]+"
+
+    # ── Datadog ───────────────────────────────────────────────────────────
+    "Datadog API Key|||(?i)datadog.{0,20}(api.?key|token)\s*[:=]\s*['\"]?[a-f0-9]{32}['\"]?"
+
+    # ── Mailchimp ─────────────────────────────────────────────────────────
+    "Mailchimp API Key|||[a-fA-F0-9]{32}-us[0-9]{1,2}"
+
+    # ── npm ───────────────────────────────────────────────────────────────
+    "npm Token|||npm_[a-zA-Z0-9]{36}"
+
+    # ── Docker Hub ────────────────────────────────────────────────────────
+    "Docker Hub Personal Access Token|||dckr_pat_[a-zA-Z0-9\-_]{27}"
+
+    # ── HashiCorp Vault ───────────────────────────────────────────────────
+    "HashiCorp Vault token|||s\.[a-zA-Z0-9]{24}"
+
+    # ── Private keys (PEM blocks) ─────────────────────────────────────────
+    "RSA/EC/DSA Private Key block|||-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+
+    # ── Connection strings ────────────────────────────────────────────────
+    "Database connection string with password|||(?i)(mysql|postgres|postgresql|mongodb|redis|mssql):\/\/[^:]+:[^@]+@"
+
+    # ── JWT (only flag hard-coded literals, not env-var references) ───────
+    "Hardcoded JWT literal|||eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"
+  )
+
+  # ── allowlist: lines containing any of these strings are skipped ─────────
+  # Extend this list to suppress known-false-positives.
+  ALLOWLIST_PATTERNS=(
+    "# noqa"                   # Python inline suppression
+    "# nosec"                  # Bandit suppression
+    "# pre-push: ignore"       # Custom suppression marker for this hook
+    "example.com"
+    "placeholder"
+    "your_api_key"
+    "your_secret"
+    "your_token"
+    "YOUR_"
+    "<YOUR"
+    "INSERT_"
+    "REPLACE_"
+    "TODO"
+    "changeme"
+    "xxxx"
+    "****"
+  )
+
+  # ── gather the diff for the push ─────────────────────────────────────────
+  # Added/modified lines only (lines starting with + but not the +++ header).
+  local diff_content
+  diff_content=$(git diff "$COMPARE_BASE" "$LOCAL_SHA" 2>/dev/null || true)
+
+  if [[ -z "$diff_content" ]]; then
+    ok "No diff to scan."
+    return 0
+  fi
+
+  # Isolate added lines; strip the leading + so patterns match clean content.
+  local added_lines
+  added_lines=$(echo "$diff_content" \
+    | grep -E '^\+' \
+    | grep -v '^\+\+\+' \
+    | sed 's/^\+//' \
+    || true)
+
+  if [[ -z "$added_lines" ]]; then
+    ok "No new lines to scan."
+    return 0
+  fi
+
+  # ── scan ─────────────────────────────────────────────────────────────────
+  local found=0
+  local findings=()
+
+  for entry in "${SECRET_PATTERNS[@]}"; do
+    local label regex
+    label="${entry%%|||*}"
+    regex="${entry##*|||}"
+
+    # Run grep (-P for Perl-compatible regex, -n for line numbers)
+    local matches
+    matches=$(echo "$added_lines" \
+      | grep -Pn "$regex" \
+      || true)
+
+    [[ -z "$matches" ]] && continue
+
+    # Apply allowlist — drop any line containing a known-safe string
+    local filtered=""
+    while IFS= read -r line; do
+      local allowed=false
+      for allow in "${ALLOWLIST_PATTERNS[@]}"; do
+        if echo "$line" | grep -qF "$allow"; then
+          allowed=true
+          break
+        fi
+      done
+      $allowed || filtered+="$line"$'\n'
+    done <<< "$matches"
+
+    [[ -z "$filtered" ]] && continue
+
+    found=1
+    findings+=("$label|||$filtered")
+  done
+
+  # ── report ───────────────────────────────────────────────────────────────
+  if [[ $found -eq 0 ]]; then
+    ok "No hardcoded credentials detected."
+    return 0
+  fi
+
+  echo ""
+  fail "Potential hardcoded credentials found in this push!"
+  echo ""
+  echo -e "  ${RED}This push has been blocked to protect your repository.${RST}"
+  echo -e "  ${RED}Remove or rotate any exposed secrets before pushing.${RST}"
+  echo ""
+
+  for entry in "${findings[@]}"; do
+    local flabel fmatches
+    flabel="${entry%%|||*}"
+    fmatches="${entry##*|||}"
+    echo -e "  ${BLD}${YEL}▶ ${flabel}${RST}"
+    while IFS= read -r m; do
+      [[ -z "$m" ]] && continue
+      # Redact the matched value partially for safe terminal display
+      local redacted
+      redacted=$(echo "$m" | sed -E 's/([a-zA-Z0-9+/=_\-]{8})[a-zA-Z0-9+/=_\-]{4,}/\1****/g')
+      echo -e "    ${RED}${redacted}${RST}"
+    done <<< "$fmatches"
+    echo ""
+  done
+
+  echo -e "  ${CYN}Remediation options:${RST}"
+  echo "  1. Move secrets to environment variables or a secrets manager."
+  echo "  2. Add a .env file (git-ignored) and load it at runtime."
+  echo "  3. Use a tool like Vault, AWS Secrets Manager, or Doppler."
+  echo "  4. If a secret was already pushed, rotate it immediately."
+  echo "  5. To suppress a known-safe line, add the comment:  # pre-push: ignore"
+  echo ""
+
+  abort "Push blocked due to hardcoded credentials."
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 4 — NEW FILES / FOLDERS
+# ══════════════════════════════════════════════════════════════════════════════
+check_new_paths() {
+  # Find all paths (files and dirs) added since the comparison base.
+  # --diff-filter=A  →  Added only
+  # --name-only      →  Just the paths
+
+  local new_files new_dirs all_new
+
+  # Added files
+  new_files=$(git diff --diff-filter=A --name-only "$COMPARE_BASE" "$LOCAL_SHA" 2>/dev/null || true)
+
+  # Derive new directories from added files (unique parent dirs not in base)
+  new_dirs=""
+  if [[ -n "$new_files" ]]; then
+    while IFS= read -r f; do
+      dir=$(dirname "$f")
+      [[ "$dir" == "." ]] && continue
+      # Only flag the directory if it didn't exist in the remote base
+      if ! git ls-tree -d --name-only "$COMPARE_BASE" "$dir" &>/dev/null 2>&1; then
+        new_dirs+="$dir"$'\n'
+      fi
+    done <<< "$new_files"
+    new_dirs=$(echo "$new_dirs" | sort -u | grep -v '^$' || true)
+  fi
+
+  all_new=""
+  [[ -n "$new_files" ]] && all_new+="$new_files"$'\n'
+  # Append new dirs with a trailing / to make them visually distinct
+  if [[ -n "$new_dirs" ]]; then
+    while IFS= read -r d; do
+      [[ -z "$d" ]] && continue
+      all_new+="${d}/"$'\n'
+    done <<< "$new_dirs"
+  fi
+  all_new=$(echo "$all_new" | sort -u | grep -v '^$' || true)
+
+  if [[ -z "$all_new" ]]; then
+    ok "No new files or folders detected."
+    return 0
+  fi
+
+  # ── warning ──────────────────────────────────────────────────────────────
+  echo ""
+  warn "The following ${BLD}new files / folders${RST}${YEL} will be pushed:${RST}"
+  echo ""
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if [[ "$path" == */ ]]; then
+      echo -e "  ${CYN}📁 ${path}${RST}"
+    else
+      echo -e "  📄 ${path}"
+    fi
+  done <<< "$all_new"
+  echo ""
+
+  # ── confirmation ─────────────────────────────────────────────────────────
+  # Read directly from /dev/tty so it works even when stdin is the hook pipe.
+  exec </dev/tty
+  warn "Do you want to include these new paths in the push? [y/N] "
+  read -r answer
+
+  case "$answer" in
+    [yY]|[yY][eE][sS])
+      ok "Confirmed — new paths will be included."
+      ;;
+    *)
+      abort "Push cancelled. Stage only the files you intend to push and try again."
+      ;;
+  esac
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RUN ALL CHECKS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Comment out any checks you don't need.
+run_lint
+run_tests
+check_secrets
+check_new_paths
+
+echo ""
+ok "All pre-push checks passed. Pushing…"
+echo ""
+
+exit 0
