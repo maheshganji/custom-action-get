@@ -4970,28 +4970,53 @@ exports["default"] = _default;
 const core = __nccwpck_require__(2186);
 const axios = __nccwpck_require__(8757);
 
+function circularSafeStringify(obj) {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, value) => {
+        if (key === '_sessionCache') return undefined;
+        if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+        }
+        return value;
+    });
+}
+
 async function createChange({
-  instanceUrl,
-  toolId,
-  username,
-  passwd,
-  jobname,
-  githubContextStr,
-  changeRequestDetailsStr,
-  changeCreationTimeOut
+    instanceUrl,
+    toolId,
+    username,
+    passwd,
+    token,
+    jobname,
+    githubContextStr,
+    changeRequestDetailsStr,
+    changeCreationTimeOut,
+    deploymentGateStr
 }) {
-   
+
     console.log('Calling Change Control API to create change....');
-    
+
     let changeRequestDetails;
+    let deploymentGateDetails;
     let attempts = 0;
     changeCreationTimeOut = changeCreationTimeOut * 1000;
 
     try {
-      changeRequestDetails = JSON.parse(changeRequestDetailsStr);
+        changeRequestDetails = JSON.parse(changeRequestDetailsStr);
     } catch (e) {
         console.log(`Error occured with message ${e}`);
         throw new Error("Failed parsing changeRequestDetails");
+    }
+
+    try {
+        if (deploymentGateStr)
+            deploymentGateDetails = JSON.parse(deploymentGateStr);
+    } catch (e) {
+        console.log(`Error occured with message ${e}`);
+        throw new Error("Failed parsing deploymentGateDetails");
     }
 
     let githubContext;
@@ -5004,7 +5029,7 @@ async function createChange({
     }
 
     let payload;
-    
+
     try {
         payload = {
             'toolId': toolId,
@@ -5018,44 +5043,69 @@ async function createChange({
             'branchName': `${githubContext.ref_name}`,
             'changeRequestDetails': changeRequestDetails
         };
+        if (deploymentGateStr) {
+            payload.deploymentGateDetails = deploymentGateDetails;
+        }
     } catch (err) {
         console.log(`Error occured with message ${err}`);
         throw new Error("Exception preparing payload");
     }
 
-    const postendpoint = `${instanceUrl}/api/sn_devops/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+    let postendpoint = '';
     let response;
     let status = false;
 
-    while (attempts < 3) {
+    if (token === '' && username === '' && passwd === '') {
+        throw new Error('Either secret token or integration username, password is needed for integration user authentication');
+    }
+    else if (token !== '') {
+        postendpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+        const defaultHeadersForToken = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+        };
+        httpHeaders = { headers: defaultHeadersForToken };
+    }
+    else if (username !== '' && passwd !== '') {
+        postendpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeControl?toolId=${toolId}&toolType=github_server`;
+        const tokenBasicAuth = `${username}:${passwd}`;
+        const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
+
+        const defaultHeadersForBasicAuth = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+        };
+        httpHeaders = { headers: defaultHeadersForBasicAuth };
+    }
+    else {
+        throw new Error('For Basic Auth, Username and Password is mandatory for integration user authentication');
+    }
+    var retry = true;
+    core.debug("[ServiceNow DevOps], Sending Request for Create Change, Request Header :" + JSON.stringify(httpHeaders) + ", Payload :" + JSON.stringify(payload) + "\n");
+    while (retry) {
         try {
             ++attempts;
-            const token = `${username}:${passwd}`;
-            const encodedToken = Buffer.from(token).toString('base64');
-
-            const defaultHeaders = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': 'Basic ' + `${encodedToken}`
-            };
-            let httpHeaders = { headers: defaultHeaders, timeout: changeCreationTimeOut };
+            retry = false;
+            httpHeaders.timeout = changeCreationTimeOut;
+            payload.retryattempts = attempts;
             response = await axios.post(postendpoint, JSON.stringify(payload), httpHeaders);
             status = true;
             break;
         } catch (err) {
-            
             if (err.code === 'ECONNABORTED') {
                 throw new Error(`change creation timeout after ${err.config.timeout}s`);
-              }
+            }
 
             if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
                 throw new Error('Invalid ServiceNow Instance URL. Please correct the URL and try again.');
             }
-            
+
             if (err.message.includes('401')) {
                 throw new Error('Invalid Credentials. Please correct the credentials and try again.');
             }
-               
+
             if (err.message.includes('405')) {
                 throw new Error('Response Code from ServiceNow is 405. Please correct ServiceNow logs for more details.');
             }
@@ -5067,37 +5117,51 @@ async function createChange({
             if (err.response.status == 500) {
                 throw new Error('Response Code from ServiceNow is 500. Please check ServiceNow logs for more details.')
             }
-            
+
             if (err.response.status == 400) {
                 let errMsg = 'ServiceNow DevOps Change is not created. Please check ServiceNow logs for more details.';
                 let responseData = err.response.data;
                 if (responseData && responseData.error && responseData.error.message) {
                     errMsg = responseData.error.message;
-                } else if (responseData && responseData.result && responseData.result.details && responseData.result.details.errors) {
-                    errMsg = 'ServiceNow DevOps Change is not created. ';
-                    let errors = err.response.data.result.details.errors;
-                    for (var index in errors) {
-                        errMsg = errMsg + errors[index].message;
+                } else if (responseData && responseData.result) {
+                    let result = responseData.result;
+                    if (result.details && result.details.errors) {
+                        errMsg = 'ServiceNow DevOps Change is not created. ';
+                        let errors = err.response.data.result.details.errors;
+                        for (var index in errors) {
+                            errMsg = errMsg + errors[index].message;
+                        }
+                    }
+                    else if (result.errorMessage) {
+                        errMsg = result.errorMessage;
                     }
                 }
-                if (errMsg.indexOf('callbackURL') == -1)
-                    throw new Error(errMsg);
-                else if (attempts >= 3) {
-                    errMsg = 'Task/Step Execution not created in ServiceNow DevOps for this job/stage ' + jobname + '. Please check Inbound Events processing details in ServiceNow instance and ServiceNow logs for more details.';
+                if (errMsg.indexOf('Waiting for Inbound Event') == -1) {
+                    retry = true;
+                    console.log("Enterting the waiting for inbound event if block");
+                } else if (attempts >= 3) {
+                    retry = false;
+                } else if (errMsg.indexOf('callbackURL') == -1) {
                     throw new Error(errMsg);
                 }
+                if (!retry) {
+                    core.debug("[ServiceNow DevOps], Receiving response for Create Change, Response :" + circularSafeStringify(response) + "\n");
+                }
+                await new Promise((resolve) => setTimeout(resolve, 30000));
+
+                console.log("we are having error Message Details: "+ errMsg);
+                console.log("Attempt number" + attempts);
+                
             }
-            await new Promise((resolve) => setTimeout(resolve, 30000));
         }
-    }
-    if (status) {
-        var result = response.data.result;
-        if (result && result.message) {
-            console.log('\n    \x1b[1m\x1b[36m'+result.message+'\x1b[0m\x1b[0m');
+        if (status) {
+            var result = response.data.result;
+            if (result && result.message) {
+                console.log('\n     \x1b[1m\x1b[36m' + result.message + '\x1b[0m\x1b[0m');
+            }
         }
     }
 }
-
 module.exports = { createChange };
 
 /***/ }),
@@ -5113,103 +5177,151 @@ async function doFetch({
   toolId,
   username,
   passwd,
+  token,
   jobname,
-  githubContextStr
+  githubContextStr,
+  prevPollChangeDetails
 }) {
-    console.log(`\nPolling for change status..........`);
 
-    let githubContext = JSON.parse(githubContextStr);
-    
-    const codesAllowedArr = '200,201,400,401,403,404,500'.split(',').map(Number);
-    const pipelineName = `${githubContext.repository}` + '/' + `${githubContext.workflow}`;
-    const buildNumber = `${githubContext.run_id}`;
-    const attemptNumber = `${githubContext.run_attempt}`;
 
-    const endpoint = `${instanceUrl}/api/sn_devops/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
-    
-    let response = {};
-    let status = false;
-    let changeStatus = {};
-    let responseCode = 500;
+  let githubContext = JSON.parse(githubContextStr);
+
+  const codesAllowedArr = '200,201,400,401,403,404,500'.split(',').map(Number);
+  const pipelineName = `${githubContext.repository}` + '/' + `${githubContext.workflow}`;
+  const buildNumber = `${githubContext.run_id}`;
+  const attemptNumber = `${githubContext.run_attempt}`;
+
+  let endpoint = '';
+  let httpHeaders = {};
+
+  let response = {};
+  let status = false;
+  let changeStatus = {};
+  let responseCode = 500;
+
+  try {
+    if (token !== '') {
+      endpoint = `${instanceUrl}/api/sn_devops/v2/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const defaultHeadersForToken = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'sn_devops.DevOpsToken ' + `${toolId}:${token}`
+      };
+      httpHeaders = { headers: defaultHeadersForToken };
+    }
+    else {
+      endpoint = `${instanceUrl}/api/sn_devops/v1/devops/orchestration/changeStatus?toolId=${toolId}&stageName=${jobname}&pipelineName=${pipelineName}&buildNumber=${buildNumber}&attemptNumber=${attemptNumber}`;
+      const tokenBasicAuth = `${username}:${passwd}`;
+      const encodedTokenForBasicAuth = Buffer.from(tokenBasicAuth).toString('base64');
+
+      const defaultHeadersForBasicAuth = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Basic ' + `${encodedTokenForBasicAuth}`
+      };
+      httpHeaders = { headers: defaultHeadersForBasicAuth };
+    }
+    response = await axios.get(endpoint, httpHeaders);
+    status = true;
+  } catch (err) {
+    if (!err.response) {
+      throw new Error("500");
+    }
+
+    if (!codesAllowedArr.includes(err.response.status)) {
+      throw new Error("500");
+    }
+
+    if (err.response.status == 500) {
+      throw new Error("500");
+    }
+
+    if (err.response.status == 400) {
+      let responseData = err.response.data;
+      if (responseData && responseData.result && responseData.result.errorMessage) {//Other technical error messages
+        let errMsg = responseData.result.errorMessage;
+        throw new Error(JSON.stringify({ "status": "error", "details": errMsg }));
+      }
+
+      throw new Error("400");
+    }
+
+    if (err.response.status == 401) {
+      throw new Error("401");
+    }
+
+    if (err.response.status == 403) {
+      throw new Error("403");
+    }
+
+    if (err.response.status == 404) {
+      throw new Error("404");
+    }
+  }
+
+  if (status) {
+    try {
+      responseCode = response.status;
+    } catch (error) {
+      core.setFailed('\nCould not read response code from API response: ' + error);
+      throw new Error("500");
+    }
 
     try {
-        const token = `${username}:${passwd}`;
-        const encodedToken = Buffer.from(token).toString('base64');
-
-        const defaultHeaders = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': 'Basic ' + `${encodedToken}`
-        };
-
-        let httpHeaders = { headers: defaultHeaders };
-        response = await axios.get(endpoint, httpHeaders);
-        status = true;
-    } catch (err) {
-        if (!err.response) {
-           throw new Error("500");
-        }
-
-        if (!codesAllowedArr.includes(err.response.status)) {
-          throw new Error("500");
-        }
-   
-        if (err.response.status == 500) {
-            throw new Error("500");
-        }
-
-        if (err.response.status == 400) {
-          throw new Error("400");
-        }
-
-        if (err.response.status == 401) {
-          throw new Error("401");
-        }
-
-        if (err.response.status == 403) {
-          throw new Error("403");
-        }
-
-        if (err.response.status == 404) {
-          throw new Error("404");
-        }
+      changeStatus = response.data.result;
+    } catch (error) {
+      core.setFailed('\nCould not read change status details from API response: ' + error);
+      throw new Error("500");
     }
-    
-    if (status) {
-        try {
-          responseCode = response.status;
-        } catch (error) {
-            core.setFailed('\nCould not read response code from API response: ' + error);
-            throw new Error("500");
+
+    let currChangeDetails = changeStatus.details;
+    let changeState = currChangeDetails.status;
+
+    if (currChangeDetails) {
+      if (currChangeDetails.number)
+        core.setOutput('change-request-number', currChangeDetails.number);
+      if (currChangeDetails.sys_id)
+        core.setOutput('change-request-sys-id', currChangeDetails.sys_id);
+    }
+
+    if (responseCode == 201) {
+      if (changeState == "pending_decision") {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+          console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
         }
-
-        try {
-          changeStatus = response.data.result;
-        } catch (error) {
-            core.setFailed('\nCould not read change status details from API response: ' + error);
-            throw new Error("500");
+        throw new Error(JSON.stringify({ "statusCode": "201", "details": currChangeDetails }));
+      } else if ((changeState == "failed") || (changeState == "error")) {
+        throw new Error(JSON.stringify({ "status": "error", "details": currChangeDetails.details }));
+      } else if (changeState == "rejected" || changeState == "canceled_by_user") {
+        if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+          console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
         }
+        throw new Error("202");
+      }
+    }
+    else if (responseCode == 200) {
+      if (isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails)) {
+        console.log('\n \x1b[1m\x1b[32m' + JSON.stringify(currChangeDetails) + '\x1b[0m\x1b[0m');
+      }
+      console.log('\n****Change is Approved.');
+    }
+  }
+  else
+    throw new Error("500");
 
-        let details =  changeStatus.details;
-        console.log('\n     \x1b[1m\x1b[32m'+JSON.stringify(details)+'\x1b[0m\x1b[0m');
+  return true;
+}
 
-
-        let changeState =  details.status;
-
-          if (responseCode == 201) {
-            if (changeState == "pending_decision") {
-              throw new Error("201");
-            } else
-              throw new Error("202");
-          }
-
-        if (responseCode == 200) {
-            console.log('\n****Change is Approved.');
-        }
-    } else
-        throw new Error("500");
-
+function isChangeDetailsChanged(prevPollChangeDetails, currChangeDetails) {
+  if (Object.keys(currChangeDetails).length !== Object.keys(prevPollChangeDetails).length) {
     return true;
+  }
+  for (let field of Object.keys(currChangeDetails)) {
+    if (currChangeDetails[field] !== prevPollChangeDetails[field]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 module.exports = { doFetch };
@@ -5230,9 +5342,11 @@ async function tryFetch({
   toolId,
   username,
   passwd,
+  token,
   jobname,
   githubContextStr,
-  changeFlag
+  abortOnChangeStepTimeout,
+  prevPollChangeDetails
 }) {
     try {
         await doFetch({
@@ -5240,8 +5354,10 @@ async function tryFetch({
           toolId,
           username,
           passwd,
+          token,
           jobname,
-          githubContextStr
+          githubContextStr,
+          prevPollChangeDetails
         });
     } catch (error) {
         if (error.message == "500") {
@@ -5267,19 +5383,29 @@ async function tryFetch({
         if (error.message == "202") {
           throw new Error("****Change has been created but the change is either rejected or cancelled.");
         }
-        if (error.message == "201") {
-          console.log('\n****Change is pending for approval decision.');
+
+        const errorMessage = error.message;
+        if (errorMessage) {
+          const errorObject = JSON.parse(errorMessage);
+          if (errorObject && errorObject.statusCode == "201") {
+            prevPollChangeDetails = errorObject.details;
+          }else if(errorObject && errorObject.status == "error"){
+            //throws error incase of status is 'error'
+            throw new Error(errorObject.details);
+          }
         }
+
         // Wait and then continue
         await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-        
+
         if (+new Date() - start > timeout * 1000) {
-          if(changeFlag){
-             console.error('\n    \x1b[38;5;214m Time out occured after '+timeout+' seconds but pipeline will coninue since change flag is true \x1b[38;5;214m');
+          if(!abortOnChangeStepTimeout){
+             console.error('\n    \x1b[38;5;214m Timeout occured after '+timeout+' seconds but pipeline will coninue since abortOnChangeStepTimeout flag is false \x1b[38;5;214m');
              return;
           }
-             throw new Error(`Timeout after ${timeout} seconds.`);
+             throw new Error(`Timeout after ${timeout} seconds.Workflow execution is aborted since abortOnChangeStepTimeout flag is true`);
         }
+
 
         await tryFetch({
           start,
@@ -5289,9 +5415,11 @@ async function tryFetch({
           toolId,
           username,
           passwd,
+          token,
           jobname,
           githubContextStr,
-          changeFlag
+          abortOnChangeStepTimeout,
+          prevPollChangeDetails
         });
     }
 }
@@ -5425,7 +5553,7 @@ module.exports = require("zlib");
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
-// Axios v1.2.5 Copyright (c) 2023 Matt Zabriskie and contributors
+// Axios v1.3.2 Copyright (c) 2023 Matt Zabriskie and contributors
 
 
 const FormData$1 = __nccwpck_require__(4334);
@@ -5433,6 +5561,7 @@ const url = __nccwpck_require__(7310);
 const proxyFromEnv = __nccwpck_require__(3329);
 const http = __nccwpck_require__(3685);
 const https = __nccwpck_require__(5687);
+const util = __nccwpck_require__(3837);
 const followRedirects = __nccwpck_require__(7707);
 const zlib = __nccwpck_require__(9796);
 const stream = __nccwpck_require__(2781);
@@ -5444,6 +5573,7 @@ const FormData__default = /*#__PURE__*/_interopDefaultLegacy(FormData$1);
 const url__default = /*#__PURE__*/_interopDefaultLegacy(url);
 const http__default = /*#__PURE__*/_interopDefaultLegacy(http);
 const https__default = /*#__PURE__*/_interopDefaultLegacy(https);
+const util__default = /*#__PURE__*/_interopDefaultLegacy(util);
 const followRedirects__default = /*#__PURE__*/_interopDefaultLegacy(followRedirects);
 const zlib__default = /*#__PURE__*/_interopDefaultLegacy(zlib);
 const stream__default = /*#__PURE__*/_interopDefaultLegacy(stream);
@@ -5965,7 +6095,7 @@ const matchAll = (regExp, str) => {
 const isHTMLForm = kindOfTest('HTMLFormElement');
 
 const toCamelCase = str => {
-  return str.toLowerCase().replace(/[_-\s]([a-z\d])(\w*)/g,
+  return str.toLowerCase().replace(/[-_\s]([a-z\d])(\w*)/g,
     function replacer(m, p1, p2) {
       return p1.toUpperCase() + p2;
     }
@@ -6049,6 +6179,37 @@ const toFiniteNumber = (value, defaultValue) => {
   return Number.isFinite(value) ? value : defaultValue;
 };
 
+const ALPHA = 'abcdefghijklmnopqrstuvwxyz';
+
+const DIGIT = '0123456789';
+
+const ALPHABET = {
+  DIGIT,
+  ALPHA,
+  ALPHA_DIGIT: ALPHA + ALPHA.toUpperCase() + DIGIT
+};
+
+const generateString = (size = 16, alphabet = ALPHABET.ALPHA_DIGIT) => {
+  let str = '';
+  const {length} = alphabet;
+  while (size--) {
+    str += alphabet[Math.random() * length|0];
+  }
+
+  return str;
+};
+
+/**
+ * If the thing is a FormData object, return true, otherwise return false.
+ *
+ * @param {unknown} thing - The thing to check.
+ *
+ * @returns {boolean}
+ */
+function isSpecCompliantForm(thing) {
+  return !!(thing && isFunction(thing.append) && thing[Symbol.toStringTag] === 'FormData' && thing[Symbol.iterator]);
+}
+
 const toJSONObject = (obj) => {
   const stack = new Array(10);
 
@@ -6126,6 +6287,9 @@ const utils = {
   findKey,
   global: _global,
   isContextDefined,
+  ALPHABET,
+  generateString,
+  isSpecCompliantForm,
   toJSONObject
 };
 
@@ -6280,17 +6444,6 @@ const predicates = utils.toFlatObject(utils, {}, null, function filter(prop) {
 });
 
 /**
- * If the thing is a FormData object, return true, otherwise return false.
- *
- * @param {unknown} thing - The thing to check.
- *
- * @returns {boolean}
- */
-function isSpecCompliant(thing) {
-  return thing && utils.isFunction(thing.append) && thing[Symbol.toStringTag] === 'FormData' && thing[Symbol.iterator];
-}
-
-/**
  * Convert a data object to FormData
  *
  * @param {Object} obj
@@ -6337,7 +6490,7 @@ function toFormData(obj, formData, options) {
   const dots = options.dots;
   const indexes = options.indexes;
   const _Blob = options.Blob || typeof Blob !== 'undefined' && Blob;
-  const useBlob = _Blob && isSpecCompliant(formData);
+  const useBlob = _Blob && utils.isSpecCompliantForm(formData);
 
   if (!utils.isFunction(visitor)) {
     throw new TypeError('visitor must be a function');
@@ -6382,7 +6535,7 @@ function toFormData(obj, formData, options) {
         value = JSON.stringify(value);
       } else if (
         (utils.isArray(value) && isFlatArray(value)) ||
-        (utils.isFileList(value) || utils.endsWith(key, '[]') && (arr = utils.toArray(value))
+        ((utils.isFileList(value) || utils.endsWith(key, '[]')) && (arr = utils.toArray(value))
         )) {
         // eslint-disable-next-line no-param-reassign
         key = removeBrackets(key);
@@ -7091,7 +7244,7 @@ class AxiosHeaders {
     if (header) {
       const key = utils.findKey(this, header);
 
-      return !!(key && (!matcher || matchHeaderValue(this, this[key], key, matcher)));
+      return !!(key && this[key] !== undefined && (!matcher || matchHeaderValue(this, this[key], key, matcher)));
     }
 
     return false;
@@ -7124,8 +7277,20 @@ class AxiosHeaders {
     return deleted;
   }
 
-  clear() {
-    return Object.keys(this).forEach(this.delete.bind(this));
+  clear(matcher) {
+    const keys = Object.keys(this);
+    let i = keys.length;
+    let deleted = false;
+
+    while (i--) {
+      const key = keys[i];
+      if(!matcher || matchHeaderValue(this, this[key], key, matcher)) {
+        delete this[key];
+        deleted = true;
+      }
+    }
+
+    return deleted;
   }
 
   normalize(format) {
@@ -7216,7 +7381,7 @@ class AxiosHeaders {
   }
 }
 
-AxiosHeaders.accessor(['Content-Type', 'Content-Length', 'Accept', 'Accept-Encoding', 'User-Agent']);
+AxiosHeaders.accessor(['Content-Type', 'Content-Length', 'Accept', 'Accept-Encoding', 'User-Agent', 'Authorization']);
 
 utils.freezeMethods(AxiosHeaders.prototype);
 utils.freezeMethods(AxiosHeaders);
@@ -7338,7 +7503,7 @@ function buildFullPath(baseURL, requestedURL) {
   return requestedURL;
 }
 
-const VERSION = "1.2.5";
+const VERSION = "1.3.2";
 
 function parseProtocol(url) {
   const match = /^([-+\w]{1,25})(:?\/\/|:)/.exec(url);
@@ -7660,6 +7825,154 @@ class AxiosTransformStream extends stream__default["default"].Transform{
 
 const AxiosTransformStream$1 = AxiosTransformStream;
 
+const {asyncIterator} = Symbol;
+
+const readBlob = async function* (blob) {
+  if (blob.stream) {
+    yield* blob.stream();
+  } else if (blob.arrayBuffer) {
+    yield await blob.arrayBuffer();
+  } else if (blob[asyncIterator]) {
+    yield* blob[asyncIterator]();
+  } else {
+    yield blob;
+  }
+};
+
+const readBlob$1 = readBlob;
+
+const BOUNDARY_ALPHABET = utils.ALPHABET.ALPHA_DIGIT + '-_';
+
+const textEncoder = new util.TextEncoder();
+
+const CRLF = '\r\n';
+const CRLF_BYTES = textEncoder.encode(CRLF);
+const CRLF_BYTES_COUNT = 2;
+
+class FormDataPart {
+  constructor(name, value) {
+    const {escapeName} = this.constructor;
+    const isStringValue = utils.isString(value);
+
+    let headers = `Content-Disposition: form-data; name="${escapeName(name)}"${
+      !isStringValue && value.name ? `; filename="${escapeName(value.name)}"` : ''
+    }${CRLF}`;
+
+    if (isStringValue) {
+      value = textEncoder.encode(String(value).replace(/\r?\n|\r\n?/g, CRLF));
+    } else {
+      headers += `Content-Type: ${value.type || "application/octet-stream"}${CRLF}`;
+    }
+
+    this.headers = textEncoder.encode(headers + CRLF);
+
+    this.contentLength = isStringValue ? value.byteLength : value.size;
+
+    this.size = this.headers.byteLength + this.contentLength + CRLF_BYTES_COUNT;
+
+    this.name = name;
+    this.value = value;
+  }
+
+  async *encode(){
+    yield this.headers;
+
+    const {value} = this;
+
+    if(utils.isTypedArray(value)) {
+      yield value;
+    } else {
+      yield* readBlob$1(value);
+    }
+
+    yield CRLF_BYTES;
+  }
+
+  static escapeName(name) {
+      return String(name).replace(/[\r\n"]/g, (match) => ({
+        '\r' : '%0D',
+        '\n' : '%0A',
+        '"' : '%22',
+      }[match]));
+  }
+}
+
+const formDataToStream = (form, headersHandler, options) => {
+  const {
+    tag = 'form-data-boundary',
+    size = 25,
+    boundary = tag + '-' + utils.generateString(size, BOUNDARY_ALPHABET)
+  } = options || {};
+
+  if(!utils.isFormData(form)) {
+    throw TypeError('FormData instance required');
+  }
+
+  if (boundary.length < 1 || boundary.length > 70) {
+    throw Error('boundary must be 10-70 characters long')
+  }
+
+  const boundaryBytes = textEncoder.encode('--' + boundary + CRLF);
+  const footerBytes = textEncoder.encode('--' + boundary + '--' + CRLF + CRLF);
+  let contentLength = footerBytes.byteLength;
+
+  const parts = Array.from(form.entries()).map(([name, value]) => {
+    const part = new FormDataPart(name, value);
+    contentLength += part.size;
+    return part;
+  });
+
+  contentLength += boundaryBytes.byteLength * parts.length;
+
+  contentLength = utils.toFiniteNumber(contentLength);
+
+  const computedHeaders = {
+    'Content-Type': `multipart/form-data; boundary=${boundary}`
+  };
+
+  if (Number.isFinite(contentLength)) {
+    computedHeaders['Content-Length'] = contentLength;
+  }
+
+  headersHandler && headersHandler(computedHeaders);
+
+  return stream.Readable.from((async function *() {
+    for(const part of parts) {
+      yield boundaryBytes;
+      yield* part.encode();
+    }
+
+    yield footerBytes;
+  })());
+};
+
+const formDataToStream$1 = formDataToStream;
+
+class ZlibHeaderTransformStream extends stream__default["default"].Transform {
+  __transform(chunk, encoding, callback) {
+    this.push(chunk);
+    callback();
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (chunk.length !== 0) {
+      this._transform = this.__transform;
+
+      // Add Default Compression headers if no zlib headers are present
+      if (chunk[0] !== 120) { // Hex: 78
+        const header = Buffer.alloc(2);
+        header[0] = 120; // Hex: 78
+        header[1] = 156; // Hex: 9C 
+        this.push(header, encoding);
+      }
+    }
+
+    this.__transform(chunk, encoding, callback);
+  }
+}
+
+const ZlibHeaderTransformStream$1 = ZlibHeaderTransformStream;
+
 const zlibOptions = {
   flush: zlib__default["default"].constants.Z_SYNC_FLUSH,
   finishFlush: zlib__default["default"].constants.Z_SYNC_FLUSH
@@ -7754,7 +8067,8 @@ const isHttpAdapterSupported = typeof process !== 'undefined' && utils.kindOf(pr
 
 /*eslint consistent-return:0*/
 const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
-  return new Promise(function dispatchHttpRequest(resolvePromise, rejectPromise) {
+  /*eslint no-async-promise-executor:0*/
+  return new Promise(async function dispatchHttpRequest(resolvePromise, rejectPromise) {
     let data = config.data;
     const responseType = config.responseType;
     const responseEncoding = config.responseEncoding;
@@ -7818,7 +8132,7 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
 
     // Parse url
     const fullPath = buildFullPath(config.baseURL, config.url);
-    const parsed = new URL(fullPath);
+    const parsed = new URL(fullPath, 'http://localhost');
     const protocol = parsed.protocol || supportedProtocols[0];
 
     if (protocol === 'data:') {
@@ -7845,7 +8159,7 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
         convertedData = convertedData.toString(responseEncoding);
 
         if (!responseEncoding || responseEncoding === 'utf8') {
-          data = utils.stripBOM(convertedData);
+          convertedData = utils.stripBOM(convertedData);
         }
       } else if (responseType === 'stream') {
         convertedData = stream__default["default"].Readable.from(convertedData);
@@ -7882,9 +8196,32 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     let maxUploadRate = undefined;
     let maxDownloadRate = undefined;
 
-    // support for https://www.npmjs.com/package/form-data api
-    if (utils.isFormData(data) && utils.isFunction(data.getHeaders)) {
+    // support for spec compliant FormData objects
+    if (utils.isSpecCompliantForm(data)) {
+      const userBoundary = headers.getContentType(/boundary=([-_\w\d]{10,70})/i);
+
+      data = formDataToStream$1(data, (formHeaders) => {
+        headers.set(formHeaders);
+      }, {
+        tag: `axios-${VERSION}-boundary`,
+        boundary: userBoundary && userBoundary[1] || undefined
+      });
+      // support for https://www.npmjs.com/package/form-data api
+    } else if (utils.isFormData(data) && utils.isFunction(data.getHeaders)) {
       headers.set(data.getHeaders());
+
+      if (!headers.hasContentLength()) {
+        try {
+          const knownLength = await util__default["default"].promisify(data.getLength).call(data);
+          headers.setContentLength(knownLength);
+          /*eslint no-empty:0*/
+        } catch (e) {
+        }
+      }
+    } else if (utils.isBlob(data)) {
+      data.size && headers.setContentType(data.type || 'application/octet-stream');
+      headers.setContentLength(data.size || 0);
+      data = stream__default["default"].Readable.from(readBlob$1(data));
     } else if (data && !utils.isStream(data)) {
       if (Buffer.isBuffer(data)) ; else if (utils.isArrayBuffer(data)) {
         data = Buffer.from(new Uint8Array(data));
@@ -7899,7 +8236,7 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       }
 
       // Add Content-Length header if data exists
-      headers.set('Content-Length', data.length, false);
+      headers.setContentLength(data.length, false);
 
       if (config.maxBodyLength > -1 && data.length > config.maxBodyLength) {
         return reject(new AxiosError(
@@ -8063,7 +8400,15 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
         case 'x-gzip':
         case 'compress':
         case 'x-compress':
+          // add the unzipper to the body stream processing pipeline
+          streams.push(zlib__default["default"].createUnzip(zlibOptions));
+
+          // remove the content-encoding in order to not confuse downstream operations
+          delete res.headers['content-encoding'];
+          break;
         case 'deflate':
+          streams.push(new ZlibHeaderTransformStream$1());
+
           // add the unzipper to the body stream processing pipeline
           streams.push(zlib__default["default"].createUnzip(zlibOptions));
 
@@ -9442,61 +9787,69 @@ var __webpack_exports__ = {};
 const core = __nccwpck_require__(2186);
 const axios = __nccwpck_require__(8757);
 const { createChange } = __nccwpck_require__(7767);
-//const { createChange1 } = require('./lib/change-step');
 const { tryFetch } = __nccwpck_require__(9538);
 
-const main = async () => {
+const main = async() => {
   try {
     const instanceUrl = core.getInput('instance-url', { required: true });
     const toolId = core.getInput('tool-id', { required: true });
-    const username = core.getInput('devops-integration-user-name', { required: true });
-    const passwd = core.getInput('devops-integration-user-password', { required: true });
+    const username = core.getInput('devops-integration-user-name', { required: false });
+    const passwd = core.getInput('devops-integration-user-password', { required: false });
+    const token = core.getInput('devops-integration-token', { required: false });
     const jobname = core.getInput('job-name', { required: true });
+    const deploymentGateStr = core.getInput('deployment-gate', { required: false });
 
     let changeRequestDetailsStr = core.getInput('change-request', { required: true });
     let githubContextStr = core.getInput('context-github', { required: true });
-
 
     let abortOnChangeCreationFailure = core.getInput('abortOnChangeCreationFailure');
     abortOnChangeCreationFailure = abortOnChangeCreationFailure === undefined || abortOnChangeCreationFailure === "" ? true : (abortOnChangeCreationFailure == "true");
     let changeCreationTimeOut = parseInt(core.getInput('changeCreationTimeOut') || 3600);
     changeCreationTimeOut = changeCreationTimeOut >= 3600 ? changeCreationTimeOut : 3600;
+
     let status = true;
     let response;
 
     try {
-     await createChange({
+      response = await createChange({
         instanceUrl,
         toolId,
         username,
         passwd,
+        token,
         jobname,
         githubContextStr,
         changeRequestDetailsStr,
-        changeCreationTimeOut
+        changeCreationTimeOut,
+        deploymentGateStr
       });
     } catch (err) {
-
       if (abortOnChangeCreationFailure) {
         status = false;
         core.setFailed(err.message);
       }
       else { 
-        console.error("creation failed with error message " + err.message);
+        console.error("creation failed with error message ," + err.message);
         console.log('\n  \x1b[38;5;214m Workflow will continue executing the next step as abortOnChangeCreationFailure is ' + abortOnChangeCreationFailure + '\x1b[38;5;214m');
         return;
       }
     }
 
+    if (deploymentGateStr)
+      status = false; //do not poll to check for deployment gate feature
+
     if (status) {
-      let timeout = parseInt(core.getInput('timeout') || 3600);
-      let interval = parseInt(core.getInput('interval') || 100);
+      let timeout = parseInt(core.getInput('timeout') || 100);
+      let interval = parseInt(core.getInput('interval') || 3600);
 
-      let changeFlag = core.getInput('changeFlag');
-      changeFlag = changeFlag === undefined || changeFlag === "" ? true : (changeFlag == "true");
+      interval = interval>=100 ? interval : 100;
+      timeout = timeout>=100? timeout : 3600;
 
+      let abortOnChangeStepTimeout = core.getInput('abortOnChangeStepTimeout');
+      abortOnChangeStepTimeout = abortOnChangeStepTimeout === undefined || abortOnChangeStepTimeout === "" ? false : (abortOnChangeStepTimeout == "true");
 
       let start = +new Date();
+      let prevPollChangeDetails = {};
 
       response = await tryFetch({
         start,
@@ -9506,12 +9859,13 @@ const main = async () => {
         toolId,
         username,
         passwd,
+        token,
         jobname,
         githubContextStr,
-        changeFlag
+        abortOnChangeStepTimeout,
+        prevPollChangeDetails
       });
 
-      console.log('Get change status was successfull.');
     }
   } catch (error) {
     core.setFailed(error.message);
